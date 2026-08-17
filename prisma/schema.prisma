@@ -1,0 +1,1213 @@
+// Famora — Prisma schema
+//
+// This schema is the authoritative relational representation of the Famora
+// domain. Prisma is used for type-safe server-side data access and migrations.
+//
+// Realtime (Supabase Realtime), authentication (Supabase Auth) and
+// authorization (RLS) live on top of PostgreSQL. This schema must stay in sync
+// with the SQL declared under /supabase/migrations so that RLS policies can
+// reference the same (mapped, snake_case) table names.
+//
+// Conventions
+//  - Every model is mapped to a snake_case table name (`@@map`).
+//  - Every enumeration is mapped to a snake_case PostgreSQL enum (`@@map`).
+//  - Soft deletion is used for family resources (deleted_at, status TRASHED)
+//    so that recycle bins and restore flows can be implemented later.
+//  - The Hidden Admin role is a real internal role (HIDDEN_ADMIN). The public
+//    display role is derived centrally in src/lib/authorization and never
+//    drives authorization decisions.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enumerations
+// ---------------------------------------------------------------------------
+
+enum InternalRole {
+  FAMILY_CHIEF
+  CO_FAMILY_CHIEF
+  HIDDEN_ADMIN
+  MEMBER
+
+  @@map("internal_role")
+}
+
+enum DisplayRole {
+  FAMILY_CHIEF
+  CO_FAMILY_CHIEF
+  MEMBER
+
+  @@map("display_role")
+}
+
+enum MembershipStatus {
+  PENDING
+  ACTIVE
+  DISABLED
+  REMOVED
+
+  @@map("membership_status")
+}
+
+enum WhitelistStatus {
+  PENDING
+  ACTIVE
+  DISABLED
+  REMOVED
+
+  @@map("whitelist_status")
+}
+
+enum ConversationType {
+  FAMILY_CHAT
+  DM
+
+  @@map("conversation_type")
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  VOICE
+  DOCUMENT
+  POLL
+  SYSTEM
+
+  @@map("message_type")
+}
+
+enum PollStatus {
+  OPEN
+  CLOSED
+  ARCHIVED
+
+  @@map("poll_status")
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+
+  @@map("task_priority")
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETED
+
+  @@map("task_status")
+}
+
+enum NotebookType {
+  FAMILY
+  PERSONAL
+
+  @@map("notebook_type")
+}
+
+enum PageStatus {
+  ACTIVE
+  ARCHIVED
+  TRASHED
+
+  @@map("page_status")
+}
+
+enum AnnouncementPriority {
+  NORMAL
+  IMPORTANT
+  URGENT
+
+  @@map("announcement_priority")
+}
+
+enum AnnouncementStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+
+  @@map("announcement_status")
+}
+
+enum EventVisibility {
+  FAMILY
+  PRIVATE
+
+  @@map("event_visibility")
+}
+
+enum RsvpStatus {
+  NONE
+  YES
+  NO
+  MAYBE
+
+  @@map("rsvp_status")
+}
+
+enum AuditResult {
+  SUCCESS
+  FAILURE
+  DENIED
+
+  @@map("audit_result")
+}
+
+enum RiskLevel {
+  MODERATE
+  HIGH
+  CRITICAL
+
+  @@map("risk_level")
+}
+
+enum FileCategory {
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  ARCHIVE
+  OTHER
+
+  @@map("file_category")
+}
+
+enum NotificationChannel {
+  IN_APP
+  BROWSER
+  EMAIL
+
+  @@map("notification_channel")
+}
+
+// ---------------------------------------------------------------------------
+// Identity & users
+// ---------------------------------------------------------------------------
+
+// User records are synchronized with Supabase Auth identities (auth.users.id).
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  email         String    @unique // normalized verified email
+  displayName   String
+  preferredName String?
+  avatarUrl     String?
+  bio           String?   @db.Text
+  birthday      DateTime? @db.Date
+  phone         String?
+  timezone      String    @default("UTC")
+  language      String    @default("en")
+  lastActiveAt  DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  settings            UserSettings?
+  devices             UserDevice[]
+  memberships         FamilyMember[]
+  globalNotifications UserNotificationPreference[]
+  notebooks           Notebook[]
+  notifications       Notification[]
+
+  @@map("users")
+}
+
+model UserSettings {
+  id                String   @id @default(uuid()) @db.Uuid
+  userId            String   @unique @db.Uuid
+  theme             String   @default("system") // light | dark | system
+  density           String   @default("comfortable") // comfortable | compact
+  accessibilityJson Json? // reduced motion, larger text, high contrast…
+  dictionaryJson    Json? // personal spellcheck dictionary
+  appearanceJson    Json? // chat/agenda/notebook personal prefs
+  quietHoursJson    Json? // notification schedules
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model UserDevice {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  deviceName   String
+  userAgent    String?
+  ip           String?
+  lastActiveAt DateTime?
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_devices")
+}
+
+// ---------------------------------------------------------------------------
+// Families & membership
+// ---------------------------------------------------------------------------
+
+model Family {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  description String?  @db.Text
+  avatarPath  String?
+  timezone    String   @default("UTC")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  settings        FamilySettings?
+  members         FamilyMember[]
+  whitelist       FamilyWhitelistEntry[]
+  grants          FamilyGrant[]
+  features        FamilyFeature[]
+  auditLogs       AuditLog[]
+  activity        ActivityEvent[]
+  conversations   Conversation[]
+  agendaEvents    CalendarEvent[]
+  eventCategories EventCategory[]
+  tasks           Task[]
+  notebooks       Notebook[]
+  folders         Folder[]
+  files           File[]
+  polls           Poll[]
+  announcements   Announcement[]
+  contacts        FamilyContact[]
+  recipes         Recipe[]
+  albums          Album[]
+  memories        Memory[]
+  notifications   Notification[]
+
+  @@map("families")
+}
+
+model FamilySettings {
+  id                      String  @id @default(uuid()) @db.Uuid
+  familyId                String  @unique @db.Uuid
+  description             String? @db.Text
+  avatarPath              String?
+  timezone                String  @default("UTC")
+  defaultLanguage         String  @default("en")
+  dateFormat              String  @default("dd/MM/yyyy")
+  firstDayOfWeek          Int     @default(1)
+  chatEnabled             Boolean @default(true)
+  dmsEnabled              Boolean @default(true)
+  voiceMessagesEnabled    Boolean @default(true)
+  attachmentsEnabled      Boolean @default(true)
+  reactionsEnabled        Boolean @default(true)
+  pollsEnabled            Boolean @default(true)
+  agendaEditableByMembers Boolean @default(true)
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@map("family_settings")
+}
+
+// Per-family feature flags (family_features in the spec).
+model FamilyFeature {
+  id       String  @id @default(uuid()) @db.Uuid
+  familyId String  @db.Uuid
+  key      String // registers: chat, dms, tasks, notebook, files, polls,
+  // contacts, recipes, memories, announcements, tools
+  enabled  Boolean @default(true)
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, key])
+  @@map("family_features")
+}
+
+model FamilyMember {
+  id           String           @id @default(uuid()) @db.Uuid
+  familyId     String           @db.Uuid
+  userId       String           @db.Uuid
+  internalRole InternalRole
+  displayRole  DisplayRole
+  status       MembershipStatus @default(ACTIVE)
+  joinedAt     DateTime         @default(now())
+  lastActiveAt DateTime?
+
+  family                  Family                @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  user                    User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  settings                FamilyMemberSettings?
+  grants                  FamilyGrant[]
+  conversationMemberships ConversationMember[]
+  savedMessages           SavedMessage[]
+  pollVotes               PollVote[]
+  eventAttendees          EventAttendee[]
+  taskComments            TaskComment[]
+  auditActions            AuditLog[]            @relation("AuditActor")
+  auditTargets            AuditLog[]            @relation("AuditTarget")
+  pinnedMessages          PinnedMessage[]
+  messageReactions        MessageReaction[]
+  messageReadStates       MessageReadState[]
+  taskAssignments         TaskAssignment[]
+  sharedPageGrants        SharedPageGrant[]
+  announcementReads       AnnouncementRead[]
+  recipeComments          RecipeComment[]
+  memoryComments          MemoryComment[]
+  memoryReactions         MemoryReaction[]
+
+  @@unique([familyId, userId])
+  @@index([userId])
+  @@index([familyId, status])
+  @@map("family_members")
+}
+
+model FamilyMemberSettings {
+  id                String   @id @default(uuid()) @db.Uuid
+  memberId          String   @unique @db.Uuid
+  sidebarJson       Json? // pinned tools, ordering, hidden tools, collapsed
+  homeDashboardJson Json? // selected dashboard cards
+  landingPage       String   @default("home")
+  defaultAgendaView String   @default("month")
+  preferencesJson   Json? // per-family chat/agenda/notebook prefs
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@map("family_member_settings")
+}
+
+// Per-family permission grants used to make Parent / Hidden Admin / tool
+// permissions configurable without changing the four base roles.
+model FamilyGrant {
+  id         String  @id @default(uuid()) @db.Uuid
+  familyId   String  @db.Uuid
+  memberId   String  @db.Uuid
+  permission String // permission key (authoritative registry in src/lib/authorization)
+  granted    Boolean @default(true)
+
+  family Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, permission])
+  @@index([familyId])
+  @@map("family_grants")
+}
+
+// The whitelist is the hard access boundary of a family ("40. Family access
+// must be whitelist-only").
+model FamilyWhitelistEntry {
+  id           String          @id @default(uuid()) @db.Uuid
+  familyId     String          @db.Uuid
+  email        String // normalized lowercase email
+  internalRole InternalRole    @default(MEMBER)
+  status       WhitelistStatus @default(ACTIVE)
+  addedBy      String?         @db.Uuid
+  addedAt      DateTime        @default(now())
+  disabledAt   DateTime?
+  lastSignInAt DateTime?
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, email])
+  @@index([familyId, status])
+  @@map("family_whitelist")
+}
+
+// ---------------------------------------------------------------------------
+// Roles & permissions
+// ---------------------------------------------------------------------------
+
+model Permission {
+  key         String  @id
+  description String? @db.Text
+  group       String? // e.g. "members", "whitelist", "chat", "agenda"
+
+  roleAssignments RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id         String       @id @default(uuid()) @db.Uuid
+  role       InternalRole
+  permission String
+
+  permissionRef Permission? @relation(fields: [permission], references: [key], onDelete: Cascade)
+
+  @@unique([role, permission])
+  @@map("role_permissions")
+}
+
+// ---------------------------------------------------------------------------
+// Conversations, messages & chat features
+// ---------------------------------------------------------------------------
+
+model Conversation {
+  id        String           @id @default(uuid()) @db.Uuid
+  familyId  String           @db.Uuid
+  type      ConversationType
+  title     String? // for DMs display name (optional)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  family   Family               @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  members  ConversationMember[]
+  messages Message[]
+  polls    Poll[]
+
+  @@index([familyId, type])
+  @@map("conversations")
+}
+
+model ConversationMember {
+  id             String    @id @default(uuid()) @db.Uuid
+  conversationId String    @db.Uuid
+  memberId       String    @db.Uuid
+  lastReadAt     DateTime?
+  muted          Boolean   @default(false)
+  joinedAt       DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  member       FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, memberId])
+  @@map("conversation_members")
+}
+
+model Message {
+  id                String      @id @default(uuid()) @db.Uuid
+  conversationId    String      @db.Uuid
+  senderMemberId    String?     @db.Uuid // null for system messages
+  type              MessageType @default(TEXT)
+  body              String      @default("") @db.Text
+  replyToId         String?
+  metadata          Json? // forwarded_from, poll reference, gif url…
+  editedAt          DateTime?
+  deletedAt         DateTime? // soft delete; null means active
+  deletedByMemberId String?     @db.Uuid
+  createdAt         DateTime    @default(now())
+
+  conversation  Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  replyTo       Message?            @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies       Message[]           @relation("MessageReplies")
+  attachments   MessageAttachment[]
+  reactions     MessageReaction[]
+  readStates    MessageReadState[]
+  editHistory   MessageEdit[]
+  poll          Poll?
+  savedMessages SavedMessage[]
+  pinnedMessage PinnedMessage?
+
+  @@index([conversationId, createdAt])
+  @@index([senderMemberId])
+  @@map("messages")
+}
+
+model MessageEdit {
+  id             String   @id @default(uuid()) @db.Uuid
+  messageId      String   @db.Uuid
+  editorMemberId String   @db.Uuid
+  body           String   @db.Text
+  editedAt       DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("message_edits")
+}
+
+model MessageAttachment {
+  id        String  @id @default(uuid()) @db.Uuid
+  messageId String  @db.Uuid
+  blobId    String  @db.Uuid
+  caption   String?
+
+  message Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  blob    FileBlob @relation(fields: [blobId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("message_attachments")
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid()) @db.Uuid
+  messageId String   @db.Uuid
+  memberId  String   @db.Uuid
+  emoji     String
+  createdAt DateTime @default(now())
+
+  message Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  member  FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, memberId, emoji])
+  @@map("message_reactions")
+}
+
+model MessageReadState {
+  id        String   @id @default(uuid()) @db.Uuid
+  messageId String   @db.Uuid
+  memberId  String   @db.Uuid
+  readAt    DateTime @default(now())
+
+  message Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  member  FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, memberId])
+  @@map("message_read_states")
+}
+
+model SavedMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  memberId  String   @db.Uuid
+  messageId String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  member  FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  message Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, messageId])
+  @@map("saved_messages")
+}
+
+model PinnedMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  messageId String   @db.Uuid
+  memberId  String   @db.Uuid // the member who pinned it
+  createdAt DateTime @default(now())
+
+  message Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  member  FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId])
+  @@index([memberId])
+  @@map("pinned_messages")
+}
+
+// ---------------------------------------------------------------------------
+// Polls
+// ---------------------------------------------------------------------------
+
+model Poll {
+  id                String     @id @default(uuid()) @db.Uuid
+  familyId          String     @db.Uuid
+  conversationId    String?    @db.Uuid
+  messageId         String?    @unique @db.Uuid
+  createdByMemberId String     @db.Uuid
+  question          String     @db.Text
+  isAnonymous       Boolean    @default(false)
+  isMultipleChoice  Boolean    @default(false)
+  allowChangeVote   Boolean    @default(true)
+  deadline          DateTime?
+  status            PollStatus @default(OPEN)
+  createdAt         DateTime   @default(now())
+  closedAt          DateTime?
+
+  family       Family        @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  message      Message?      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  options      PollOption[]
+  votes        PollVote[]
+
+  @@index([familyId, status])
+  @@map("polls")
+}
+
+model PollOption {
+  id     String @id @default(uuid()) @db.Uuid
+  pollId String @db.Uuid
+  label  String
+
+  poll  Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes PollVote[]
+
+  @@index([pollId])
+  @@map("poll_options")
+}
+
+model PollVote {
+  id        String   @id @default(uuid()) @db.Uuid
+  pollId    String   @db.Uuid
+  optionId  String   @db.Uuid
+  memberId  String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  poll   Poll         @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  option PollOption   @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([pollId, memberId, optionId])
+  @@index([pollId])
+  @@map("poll_votes")
+}
+
+// ---------------------------------------------------------------------------
+// Agenda / calendar
+// ---------------------------------------------------------------------------
+
+model EventCategory {
+  id       String @id @default(uuid()) @db.Uuid
+  familyId String @db.Uuid
+  name     String
+  color    String @default("#4285F4")
+
+  family Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  events CalendarEvent[]
+
+  @@unique([familyId, name])
+  @@map("event_categories")
+}
+
+model CalendarEvent {
+  id                String          @id @default(uuid()) @db.Uuid
+  familyId          String          @db.Uuid
+  categoryId        String?         @db.Uuid
+  title             String
+  description       String?         @db.Text
+  location          String?
+  videoCallLink     String?
+  startAt           DateTime
+  endAt             DateTime
+  allDay            Boolean         @default(false)
+  visibility        EventVisibility @default(FAMILY)
+  recurrenceRule    String? // RFC 5545 RRULE
+  createdByMemberId String          @db.Uuid
+  updatedByMemberId String?         @db.Uuid
+  deletedAt         DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  family    Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  category  EventCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  attendees EventAttendee[]
+  reminders EventReminder[]
+
+  @@index([familyId, startAt])
+  @@map("calendar_events")
+}
+
+model EventAttendee {
+  id       String     @id @default(uuid()) @db.Uuid
+  eventId  String     @db.Uuid
+  memberId String     @db.Uuid
+  rsvp     RsvpStatus @default(NONE)
+
+  event  CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  member FamilyMember  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, memberId])
+  @@map("event_attendees")
+}
+
+model EventReminder {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventId       String    @db.Uuid
+  minutesBefore Int
+  deliveredAt   DateTime?
+
+  event CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("event_reminders")
+}
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+model Task {
+  id                  String       @id @default(uuid()) @db.Uuid
+  familyId            String       @db.Uuid
+  parentId            String?      @db.Uuid // subtasks
+  title               String
+  description         String?      @db.Text
+  dueAt               DateTime?
+  priority            TaskPriority @default(MEDIUM)
+  status              TaskStatus   @default(TODO)
+  recurrenceRule      String?
+  createdByMemberId   String       @db.Uuid
+  completedByMemberId String?      @db.Uuid
+  completedAt         DateTime?
+  deletedAt           DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  family      Family           @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  parent      Task?            @relation("SubTasks", fields: [parentId], references: [id])
+  subtasks    Task[]           @relation("SubTasks")
+  assignments TaskAssignment[]
+  comments    TaskComment[]
+  history     TaskHistory[]
+
+  @@index([familyId, status])
+  @@index([familyId, dueAt])
+  @@map("tasks")
+}
+
+model TaskAssignment {
+  id       String @id @default(uuid()) @db.Uuid
+  taskId   String @db.Uuid
+  memberId String @db.Uuid
+
+  task   Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, memberId])
+  @@map("task_assignments")
+}
+
+model TaskComment {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @db.Uuid
+  memberId  String   @db.Uuid
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  task   Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("task_comments")
+}
+
+model TaskHistory {
+  id            String   @id @default(uuid()) @db.Uuid
+  taskId        String   @db.Uuid
+  actorMemberId String   @db.Uuid
+  action        String
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@map("task_history")
+}
+
+// ---------------------------------------------------------------------------
+// Notebooks
+// ---------------------------------------------------------------------------
+
+model Notebook {
+  id       String       @id @default(uuid()) @db.Uuid
+  familyId String?      @db.Uuid // null for personal notebooks
+  ownerId  String?      @db.Uuid // null for the family notebook
+  type     NotebookType
+
+  family Family?        @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  owner  User?          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  pages  NotebookPage[]
+
+  @@index([familyId, type])
+  @@index([ownerId, type])
+  @@map("notebooks")
+}
+
+model NotebookPage {
+  id                String     @id @default(uuid()) @db.Uuid
+  notebookId        String     @db.Uuid
+  title             String
+  content           Json // structured editor JSON (Tiptap)
+  status            PageStatus @default(ACTIVE)
+  isFavorite        Boolean    @default(false)
+  isPinned          Boolean    @default(false)
+  isShared          Boolean    @default(false) // only meaningful for personal pages
+  createdByMemberId String     @db.Uuid
+  updatedByMemberId String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  deletedAt         DateTime?
+
+  notebook Notebook              @relation(fields: [notebookId], references: [id], onDelete: Cascade)
+  versions NotebookPageVersion[]
+  tags     PageTag[]
+  shares   SharedPageGrant[]
+
+  @@index([notebookId, status])
+  @@index([isFavorite])
+  @@map("notebook_pages")
+}
+
+model NotebookPageVersion {
+  id             String   @id @default(uuid()) @db.Uuid
+  pageId         String   @db.Uuid
+  editorMemberId String   @db.Uuid
+  content        Json
+  createdAt      DateTime @default(now())
+
+  page NotebookPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([pageId])
+  @@map("notebook_page_versions")
+}
+
+model SharedPageGrant {
+  id       String  @id @default(uuid()) @db.Uuid
+  pageId   String  @db.Uuid
+  memberId String  @db.Uuid
+  canEdit  Boolean @default(false)
+
+  page   NotebookPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, memberId])
+  @@map("shared_page_grants")
+}
+
+model PageTag {
+  id     String @id @default(uuid()) @db.Uuid
+  pageId String @db.Uuid
+  name   String
+
+  page NotebookPage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, name])
+  @@index([name])
+  @@map("page_tags")
+}
+
+// ---------------------------------------------------------------------------
+// Files & storage
+// ---------------------------------------------------------------------------
+
+// FileBlob is the normalized binary layer on top of Supabase Storage. Other
+// models reference a FileBlob rather than duplicating storage metadata.
+// Storage paths follow the family-aware scheme:
+//   families/{familyId}/{kind}/{...}
+//   users/{userId}/personal-notebook/{...}
+model FileBlob {
+  id          String       @id @default(uuid()) @db.Uuid
+  familyId    String?      @db.Uuid
+  ownerUserId String?      @db.Uuid // personal files
+  bucket      String
+  storagePath String // full object key
+  fileName    String
+  mimeType    String
+  size        Int
+  category    FileCategory @default(OTHER)
+  createdAt   DateTime     @default(now())
+
+  messageAttachments MessageAttachment[]
+  memoryAssets       MemoryAsset[]
+  folderFiles        File[] // family drive items referencing this blob
+  recipeCovers       Recipe[]            @relation("RecipeCover")
+  albumCovers        Album[]             @relation("AlbumCover")
+
+  @@index([familyId])
+  @@index([ownerUserId])
+  @@map("file_blobs")
+}
+
+model Folder {
+  id                String    @id @default(uuid()) @db.Uuid
+  familyId          String    @db.Uuid
+  parentId          String?   @db.Uuid
+  name              String
+  createdByMemberId String    @db.Uuid
+  deletedAt         DateTime?
+  createdAt         DateTime  @default(now())
+
+  family     Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  parent     Folder?  @relation("SubFolders", fields: [parentId], references: [id])
+  subfolders Folder[] @relation("SubFolders")
+  files      File[]
+
+  @@index([familyId, parentId])
+  @@map("folders")
+}
+
+model File {
+  id                  String    @id @default(uuid()) @db.Uuid
+  familyId            String    @db.Uuid
+  folderId            String?   @db.Uuid
+  blobId              String    @db.Uuid
+  name                String
+  isFavorite          Boolean   @default(false)
+  sharedWithMemberIds Json? // optional explicit sharing
+  uploadedByMemberId  String    @db.Uuid
+  lastAccessedAt      DateTime?
+  deletedAt           DateTime?
+  createdAt           DateTime  @default(now())
+
+  family Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  folder Folder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  blob   FileBlob @relation(fields: [blobId], references: [id], onDelete: Cascade)
+
+  @@index([familyId, folderId])
+  @@index([isFavorite])
+  @@map("files")
+}
+
+// ---------------------------------------------------------------------------
+// Announcements
+// ---------------------------------------------------------------------------
+
+model Announcement {
+  id                String               @id @default(uuid()) @db.Uuid
+  familyId          String               @db.Uuid
+  title             String
+  content           Json // rich text JSON (Tiptap)
+  priority          AnnouncementPriority @default(NORMAL)
+  status            AnnouncementStatus   @default(DRAFT)
+  scheduledFor      DateTime?
+  publishedAt       DateTime?
+  expiresAt         DateTime?
+  pinnedByMemberId  String?              @db.Uuid
+  createdByMemberId String               @db.Uuid
+  updatedByMemberId String?
+  deletedAt         DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  family Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  reads  AnnouncementRead[]
+
+  @@index([familyId, status])
+  @@map("announcements")
+}
+
+model AnnouncementRead {
+  id             String   @id @default(uuid()) @db.Uuid
+  announcementId String   @db.Uuid
+  memberId       String   @db.Uuid
+  readAt         DateTime @default(now())
+
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  member       FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, memberId])
+  @@map("announcement_reads")
+}
+
+// ---------------------------------------------------------------------------
+// Contacts, recipes, memories
+// ---------------------------------------------------------------------------
+
+model FamilyContact {
+  id                String   @id @default(uuid()) @db.Uuid
+  familyId          String   @db.Uuid
+  name              String
+  category          String
+  phone             String?
+  email             String?
+  address           String?
+  notes             String?  @db.Text
+  website           String?
+  isFavorite        Boolean  @default(false)
+  isEmergency       Boolean  @default(false)
+  createdByMemberId String   @db.Uuid
+  createdAt         DateTime @default(now())
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([familyId, isFavorite])
+  @@map("family_contacts")
+}
+
+model Recipe {
+  id                String    @id @default(uuid()) @db.Uuid
+  familyId          String    @db.Uuid
+  title             String
+  coverBlobId       String?   @db.Uuid
+  coverBlob         FileBlob? @relation("RecipeCover", fields: [coverBlobId], references: [id])
+  ingredients       Json // [{ name, quantity }]
+  instructions      Json // rich text JSON
+  prepMinutes       Int?
+  cookMinutes       Int?
+  servings          Int?
+  categories        Json? // string[]
+  tags              Json? // string[]
+  isFavorite        Boolean   @default(false)
+  createdByMemberId String    @db.Uuid
+  deletedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  family   Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  comments RecipeComment[]
+
+  @@index([familyId])
+  @@map("recipes")
+}
+
+model RecipeComment {
+  id        String   @id @default(uuid()) @db.Uuid
+  recipeId  String   @db.Uuid
+  memberId  String   @db.Uuid
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  recipe Recipe       @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([recipeId])
+  @@map("recipe_comments")
+}
+
+model Album {
+  id                String    @id @default(uuid()) @db.Uuid
+  familyId          String    @db.Uuid
+  name              String
+  description       String?
+  coverBlobId       String?   @db.Uuid
+  coverBlob         FileBlob? @relation("AlbumCover", fields: [coverBlobId], references: [id])
+  createdByMemberId String    @db.Uuid
+  createdAt         DateTime  @default(now())
+
+  family   Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  memories Memory[]
+
+  @@index([familyId])
+  @@map("albums")
+}
+
+model Memory {
+  id                 String    @id @default(uuid()) @db.Uuid
+  familyId           String    @db.Uuid
+  albumId            String?   @db.Uuid
+  caption            String?   @db.Text
+  takenAt            DateTime?
+  uploadedByMemberId String    @db.Uuid
+  deletedAt          DateTime?
+  createdAt          DateTime  @default(now())
+
+  family    Family           @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  album     Album?           @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  assets    MemoryAsset[]
+  comments  MemoryComment[]
+  reactions MemoryReaction[]
+
+  @@index([familyId, createdAt])
+  @@map("memories")
+}
+
+model MemoryAsset {
+  id          String      @id @default(uuid()) @db.Uuid
+  memoryId    String      @db.Uuid
+  blobId      String      @db.Uuid
+  kind        MessageType @default(IMAGE) // IMAGE | VIDEO
+  thumbBlobId String?
+
+  memory Memory   @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+  blob   FileBlob @relation(fields: [blobId], references: [id], onDelete: Cascade)
+
+  @@index([memoryId])
+  @@map("memory_assets")
+}
+
+model MemoryComment {
+  id        String   @id @default(uuid()) @db.Uuid
+  memoryId  String   @db.Uuid
+  memberId  String   @db.Uuid
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  memory Memory       @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memoryId])
+  @@map("memory_comments")
+}
+
+model MemoryReaction {
+  id        String   @id @default(uuid()) @db.Uuid
+  memoryId  String   @db.Uuid
+  memberId  String   @db.Uuid
+  emoji     String
+  createdAt DateTime @default(now())
+
+  memory Memory       @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memoryId, memberId, emoji])
+  @@map("memory_reactions")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  familyId  String    @db.Uuid
+  type      String // registry in src/lib/authorization/notifications
+  title     String
+  body      String?   @db.Text
+  link      String?
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@index([familyId])
+  @@map("notifications")
+}
+
+model UserNotificationPreference {
+  id        String              @id @default(uuid()) @db.Uuid
+  userId    String              @db.Uuid
+  familyId  String?             @db.Uuid
+  category  String // notification category registry
+  channel   NotificationChannel @default(IN_APP)
+  enabled   Boolean             @default(true)
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, familyId, category, channel])
+  @@map("user_notification_preferences")
+}
+
+// ---------------------------------------------------------------------------
+// Audit & activity
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id             String        @id @default(uuid()) @db.Uuid
+  familyId       String        @db.Uuid
+  actorMemberId  String?       @db.Uuid
+  actorRole      InternalRole?
+  action         String
+  targetMemberId String?       @db.Uuid
+  targetType     String
+  targetId       String?
+  metadata       Json?
+  result         AuditResult   @default(SUCCESS)
+  ip             String?
+  device         String?
+  createdAt      DateTime      @default(now())
+
+  family Family        @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  actor  FamilyMember? @relation("AuditActor", fields: [actorMemberId], references: [id], onDelete: SetNull)
+  target FamilyMember? @relation("AuditTarget", fields: [targetMemberId], references: [id], onDelete: SetNull)
+
+  @@index([familyId, createdAt])
+  @@index([actorMemberId])
+  @@map("audit_logs")
+}
+
+model ActivityEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  familyId      String   @db.Uuid
+  type          String
+  actorMemberId String?  @db.Uuid
+  targetType    String
+  targetId      String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  family Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([familyId, createdAt])
+  @@map("activity_events")
+}
