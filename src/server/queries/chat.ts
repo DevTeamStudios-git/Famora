@@ -74,13 +74,28 @@ function toSender(
   };
 }
 
-const senderSelect = {
-  select: {
-    id: true,
-    displayRole: true,
-    user: { select: { displayName: true, avatarUrl: true } },
-  },
-} as const;
+function senderInclude() {
+  return {
+    sender: {
+      select: {
+        id: true,
+        displayRole: true,
+        user: { select: { displayName: true, avatarUrl: true } },
+      },
+    },
+    replyTo: {
+      include: {
+        sender: {
+          select: {
+            id: true,
+            displayRole: true,
+            user: { select: { displayName: true, avatarUrl: true } },
+          },
+        },
+      },
+    },
+  };
+}
 
 /** Lists the most recent messages in a conversation, oldest first. */
 export async function listFamilyMessages(
@@ -92,8 +107,7 @@ export async function listFamilyMessages(
     orderBy: { createdAt: "desc" },
     take: MESSAGE_PAGE_SIZE,
     include: {
-      sender: senderSelect,
-      replyTo: { include: { sender: senderSelect } },
+      ...senderInclude(),
       reactions: true,
       pinnedMessage: true,
       savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },
@@ -147,8 +161,7 @@ export async function getFamilyMessage(
   const row = await prisma.message.findUnique({
     where: { id: messageId },
     include: {
-      sender: senderSelect,
-      replyTo: { include: { sender: senderSelect } },
+      ...senderInclude(),
       reactions: true,
       pinnedMessage: true,
       savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },

@@ -345,6 +345,7 @@ model FamilyMember {
   grants                  FamilyGrant[]
   conversationMemberships ConversationMember[]
   savedMessages           SavedMessage[]
+  sentMessages            Message[]
   pollVotes               PollVote[]
   eventAttendees          EventAttendee[]
   taskComments            TaskComment[]
@@ -494,6 +495,7 @@ model Message {
   createdAt         DateTime    @default(now())
 
   conversation  Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender        FamilyMember?       @relation(fields: [senderMemberId], references: [id], onDelete: SetNull)
   replyTo       Message?            @relation("MessageReplies", fields: [replyToId], references: [id])
   replies       Message[]           @relation("MessageReplies")
   attachments   MessageAttachment[]
