@@ -9,6 +9,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Prisma generate/validate load prisma.config.ts, which resolves DIRECT_URL
+# eagerly even though `generate`/`validate` never open a connection. These are
+# placeholders, not secrets — CI never talks to a real database.
+#
+# Node is pinned to 24 (not the runner's newer default) because Prisma 7.9.1
+# only supports Node 20.19+, 22.12+, 24.0+ — its own preinstall script warns
+# on anything else.
+env:
+  DATABASE_URL: "postgresql://ci:ci@localhost:5432/famora_ci"
+  DIRECT_URL: "postgresql://ci:ci@localhost:5432/famora_ci"
+
 jobs:
   quality:
     name: Lint, typecheck, unit tests
@@ -22,11 +33,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 26
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
 
       - name: Lint
         run: pnpm lint
@@ -52,11 +66,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 26
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
 
       - name: Build
         run: pnpm build
@@ -74,11 +91,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 26
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
 
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
