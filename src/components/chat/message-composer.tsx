@@ -13,6 +13,7 @@ type MessageComposerProps = {
   replyingTo: ChatMessage | null;
   onCancelReply: () => void;
   onSend: (body: string) => Promise<void> | void;
+  onTypingChange?: (isTyping: boolean) => void;
 };
 
 export function MessageComposer({
@@ -21,14 +22,21 @@ export function MessageComposer({
   replyingTo,
   onCancelReply,
   onSend,
+  onTypingChange,
 }: MessageComposerProps) {
   const [value, setValue] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
+  const isTyping = value.trim().length > 0 && !sending && !disabled;
+
   React.useEffect(() => {
     if (replyingTo) textareaRef.current?.focus();
   }, [replyingTo]);
+
+  React.useEffect(() => {
+    onTypingChange?.(isTyping);
+  }, [isTyping, onTypingChange]);
 
   async function handleSend() {
     const trimmed = value.trim();
@@ -88,6 +96,7 @@ export function MessageComposer({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
+          onBlur={() => onTypingChange?.(false)}
           placeholder="Message the family…"
           disabled={disabled || sending}
           rows={1}

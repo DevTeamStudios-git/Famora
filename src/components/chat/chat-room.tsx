@@ -4,6 +4,7 @@ import * as React from "react";
 import { WifiOff, MessageSquare } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { REALTIME_CHANNELS, REALTIME_POSTGRES_TABLES } from "@/lib/realtime/channels";
+import type { TypingPayload } from "@/lib/realtime/channels";
 import { EmptyState } from "@/components/core/empty-state";
 import { MessageItem } from "@/components/chat/message-item";
 import { MessageComposer } from "@/components/chat/message-composer";
@@ -22,6 +23,7 @@ import { toast } from "sonner";
 type ChatRoomProps = {
   familyId: string;
   conversationId: string;
+  viewer: { memberId: string; displayName: string };
   initialMessages: ChatMessage[];
   permissions: {
     canSend: boolean;
@@ -32,17 +34,25 @@ type ChatRoomProps = {
   };
 };
 
+const TYPING_EXPIRY_MS = 4000;
+
 export function ChatRoom({
   familyId,
   conversationId,
+  viewer,
   initialMessages,
   permissions,
 }: ChatRoomProps) {
   const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
   const [replyingTo, setReplyingTo] = React.useState<ChatMessage | null>(null);
   const [connected, setConnected] = React.useState(true);
+  const [typers, setTypers] = React.useState<Record<string, string>>({});
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const isNearBottomRef = React.useRef(true);
+  const channelRef = React.useRef<ReturnType<ReturnType<typeof getSupabaseBrowserClient>["channel"]> | null>(
+    null,
+  );
+  const typingTimersRef = React.useRef(new Map<string, number>());
 
   function upsertMessage(next: ChatMessage) {
     setMessages((prev) => {
@@ -54,9 +64,57 @@ export function ChatRoom({
     });
   }
 
+  function clearTypingTimers() {
+    for (const timer of typingTimersRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    typingTimersRef.current.clear();
+  }
+
+  function setTyping(memberId: string, displayName: string) {
+    const existing = typingTimersRef.current.get(memberId);
+    if (existing !== undefined) window.clearTimeout(existing);
+    const timer = window.setTimeout(() => {
+      typingTimersRef.current.delete(memberId);
+      setTypers((prev) => {
+        if (!(memberId in prev)) return prev;
+        const copy = { ...prev };
+        delete copy[memberId];
+        return copy;
+      });
+    }, TYPING_EXPIRY_MS);
+    typingTimersRef.current.set(memberId, timer);
+    setTypers((prev) => (prev[memberId] === displayName ? prev : { ...prev, [memberId]: displayName }));
+  }
+
+  function clearTyping(memberId: string) {
+    const timer = typingTimersRef.current.get(memberId);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      typingTimersRef.current.delete(memberId);
+    }
+    setTypers((prev) => {
+      if (!(memberId in prev)) return prev;
+      const copy = { ...prev };
+      delete copy[memberId];
+      return copy;
+    });
+  }
+
+  function broadcastTyping(isTyping: boolean) {
+    const payload: TypingPayload = {
+      conversationId,
+      memberId: viewer.memberId,
+      displayName: viewer.displayName,
+      isTyping,
+    };
+    channelRef.current?.send({ type: "broadcast", event: "typing", payload });
+  }
+
   // Realtime: the family chat table is written to via Prisma in server
   // actions, but Supabase Realtime reads from the Postgres WAL, so it still
-  // sees every insert/update regardless of which client wrote it.
+  // sees every insert/update regardless of which client wrote it. Typing
+  // presence rides the same channel as a broadcast payload.
   React.useEffect(() => {
     let active = true;
     let channel: ReturnType<ReturnType<typeof getSupabaseBrowserClient>["channel"]> | null =
@@ -82,8 +140,16 @@ export function ChatRoom({
             });
           },
         )
+        .on("broadcast", { event: "typing" }, ({ payload }) => {
+          if (!active) return;
+          const typing = payload as TypingPayload;
+          if (!typing || typing.memberId === viewer.memberId) return;
+          if (typing.isTyping) setTyping(typing.memberId, typing.displayName);
+          else clearTyping(typing.memberId);
+        })
         .subscribe((status: string) => {
           if (!active) return;
+          channelRef.current = channel;
           setConnected(status === "SUBSCRIBED");
         });
     } catch {
@@ -98,9 +164,11 @@ export function ChatRoom({
 
     return () => {
       active = false;
+      clearTypingTimers();
       if (channel) void getSupabaseBrowserClient().removeChannel(channel);
+      channelRef.current = null;
     };
-  }, [familyId, conversationId]);
+  }, [familyId, conversationId, viewer.memberId]);
 
   React.useEffect(() => {
     if (isNearBottomRef.current) {
@@ -177,6 +245,16 @@ export function ChatRoom({
     if (fresh) upsertMessage(fresh);
   }
 
+  const typerNames = Object.values(typers);
+  const typingLabel =
+    typerNames.length === 1
+      ? `${typerNames[0]} is typing…`
+      : typerNames.length === 2
+        ? `${typerNames[0]} and ${typerNames[1]} are typing…`
+        : typerNames.length > 2
+          ? "Several people are typing…"
+          : null;
+
   return (
     <div className="flex h-[calc(100dvh-8rem)] flex-col overflow-hidden rounded-xl border border-border bg-card">
       {!connected ? (
@@ -216,12 +294,19 @@ export function ChatRoom({
         <div ref={bottomRef} />
       </div>
 
+      {typingLabel ? (
+        <div className="border-t border-border px-3 pb-1 pt-1.5 text-xs text-muted-foreground">
+          <span aria-live="polite">{typingLabel}</span>
+        </div>
+      ) : null}
+
       <MessageComposer
         disabled={!permissions.canSend}
         disabledReason="You don't have permission to send messages in Family Chat."
         replyingTo={replyingTo}
         onCancelReply={() => setReplyingTo(null)}
         onSend={handleSend}
+        onTypingChange={broadcastTyping}
       />
     </div>
   );

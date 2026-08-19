@@ -4,7 +4,7 @@ import { MessageSquareOff } from "lucide-react";
 import { getAccessState } from "@/lib/auth/session";
 import { hasPermission } from "@/lib/authorization/authorization";
 import { getFamilyWithFeatures } from "@/server/queries/family";
-import { getOrCreateFamilyChatConversation, listFamilyMessages } from "@/server/queries/chat";
+import { getOrCreateFamilyChatConversation, listFamilyMessages, getMemberProfile } from "@/server/queries/chat";
 import { PageHeader } from "@/components/core/page-header";
 import { EmptyState } from "@/components/core/empty-state";
 import { ChatRoom } from "@/components/chat/chat-room";
@@ -43,6 +43,7 @@ export default async function ChatPage() {
 
   const conversationId = await getOrCreateFamilyChatConversation(familyId, memberId);
   const messages = await listFamilyMessages(conversationId, memberId);
+  const viewer = await getMemberProfile(memberId);
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -50,6 +51,10 @@ export default async function ChatPage() {
       <ChatRoom
         familyId={familyId}
         conversationId={conversationId}
+        viewer={{
+          memberId,
+          displayName: viewer?.displayName ?? "You",
+        }}
         initialMessages={messages}
         permissions={{
           canSend: hasPermission(membership, "chat.send"),

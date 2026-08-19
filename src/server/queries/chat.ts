@@ -97,6 +97,29 @@ function senderInclude() {
   };
 }
 
+export type ChatMemberProfile = {
+  memberId: string;
+  displayName: string;
+  avatarUrl: string | null;
+};
+
+/** Public-safe profile for one member (used for typing presence). */
+export async function getMemberProfile(memberId: string): Promise<ChatMemberProfile | null> {
+  const member = await prisma.familyMember.findUnique({
+    where: { id: memberId },
+    select: {
+      id: true,
+      user: { select: { displayName: true, avatarUrl: true } },
+    },
+  });
+  if (!member) return null;
+  return {
+    memberId: member.id,
+    displayName: member.user.displayName,
+    avatarUrl: member.user.avatarUrl,
+  };
+}
+
 /** Lists the most recent messages in a conversation, oldest first. */
 export async function listFamilyMessages(
   conversationId: string,
