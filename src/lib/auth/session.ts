@@ -62,7 +62,13 @@ export async function getAccessState(): Promise<AccessState> {
     return { status: "denied", user };
   }
 
-  const membership = await ensureMembership(email, user.id, internalRole);
+  const membership = await ensureMembership(email, user.id, internalRole, {
+    displayName:
+      (user.user_metadata?.full_name as string | undefined) ??
+      user.email?.split("@")[0] ??
+      user.email,
+    avatarUrl: (user.user_metadata?.avatar_url as string | undefined) ?? null,
+  });
 
   return {
     status: "authorized",
@@ -101,7 +107,27 @@ async function ensureMembership(
   email: string,
   userId: string,
   internalRole: InternalRole,
+  profile: { displayName: string; avatarUrl: string | null },
 ): Promise<MembershipContext> {
+  // A membership points at a users row (family_members.userId → users.id).
+  // First sign-in has no User yet, so provision it before creating the member.
+  await prisma.user.upsert({
+    where: { id: userId },
+    update: {
+      email,
+      displayName: profile.displayName,
+      avatarUrl: profile.avatarUrl,
+      lastActiveAt: new Date(),
+    },
+    create: {
+      id: userId,
+      email,
+      displayName: profile.displayName,
+      avatarUrl: profile.avatarUrl,
+      lastActiveAt: new Date(),
+    },
+  });
+
   const existing = await prisma.familyMember.findFirst({
     where: {
       userId,
