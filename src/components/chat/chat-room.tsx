@@ -198,7 +198,9 @@ export function ChatRoom({
     try {
       const supabase = getSupabaseBrowserClient();
       channel = supabase
-        .channel(REALTIME_CHANNELS.familyChat(familyId))
+        .channel(REALTIME_CHANNELS.familyChat(familyId), {
+          config: { private: true },
+        })
         .on(
           "postgres_changes",
           {

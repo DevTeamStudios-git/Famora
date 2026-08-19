@@ -143,6 +143,53 @@ async function subscribePostgres(
   return { channel, events };
 }
 
+/**
+ * Joins a *private* broadcast channel (Realtime Authorization): membership is
+ * gated by RLS policies on `realtime.messages`, not by table grants. Resolves
+ * on SUBSCRIBED (authorized) or on the server's rejection (CHANNEL_ERROR),
+ * whichever comes first, capped at 12s.
+ */
+async function subscribePrivate(
+  client: SupabaseClient,
+  topic: string,
+  listenEvent: string,
+): Promise<{ channel: ReturnType<SupabaseClient["channel"]>; events: unknown[]; statuses: string[] }> {
+  const events: unknown[] = [];
+  const statuses: string[] = [];
+  const channel = client.channel(topic, { config: { private: true } });
+  channel.on("broadcast", { event: listenEvent }, (payload) => events.push(payload));
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    };
+    const cap = setTimeout(finish, 12_000);
+    channel.subscribe((status, err) => {
+      statuses.push(status + (err ? ":" + (err.message ?? "") : ""));
+      if (status === "SUBSCRIBED") setTimeout(finish, 1_000);
+      else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        clearTimeout(cap);
+        finish();
+      }
+    });
+  });
+  return { channel, events, statuses };
+}
+
+type TypingBroadcast = {
+  conversationId: string;
+  memberId: string;
+  displayName: string;
+  isTyping: boolean;
+};
+
+function sendTypingBroadcast(target: ReturnType<SupabaseClient["channel"]>, payload: TypingBroadcast) {
+  target.send({ type: "broadcast", event: "typing", payload });
+}
+
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe.skipIf(!hasEnv)("Realtime authorization", () => {
@@ -175,13 +222,18 @@ describe.skipIf(!hasEnv)("Realtime authorization", () => {
     const a = await signIn(`a-${randomUUID()}@famora.test`);
     const memberA = await addMember({ userId: a.userId, familyId: familyA, conversationId: convA, internalRole: "MEMBER" });
     const { channel, events } = await subscribePostgres(a.client, `family:${familyA}:chat`, "messages", `conversationId=eq.${convA}`);
-    const id = await insertMessage({ conversationId: convA, senderMemberId: memberA, body: "hello family A" });
-    const deadline = Date.now() + 10_000;
-    while (events.length === 0 && Date.now() < deadline) await delay(250);
+    // The first WAL event can lag the SUBSCRIBED ack by a beat; keep sending
+    // (each insert is its own event) until one arrives or the budget runs out.
+    const ids: string[] = [];
+    const deadline = Date.now() + 20_000;
+    while (events.length === 0 && Date.now() < deadline) {
+      ids.push(await insertMessage({ conversationId: convA, senderMemberId: memberA, body: `ping ${ids.length + 1}` }));
+      await delay(1_500);
+    }
     await channel.unsubscribe();
     expect(events.length).toBeGreaterThan(0);
-    const ev = events[0] as { new?: { id?: string; body?: string } };
-    expect(ev.new?.id).toBe(id);
+    const ev = events[0] as { new?: { id?: string } };
+    expect(ids).toContain(ev.new?.id);
   });
 
   it("member does NOT receive another family's messages", async () => {
@@ -219,12 +271,17 @@ describe.skipIf(!hasEnv)("Realtime authorization", () => {
     const ha = await signIn(`ha-${randomUUID()}@famora.test`);
     const memberHA = await addMember({ userId: ha.userId, familyId: familyA, conversationId: convA, internalRole: "HIDDEN_ADMIN" });
     const { channel, events } = await subscribePostgres(ha.client, `family:${familyA}:chat`, "messages", `conversationId=eq.${convA}`);
-    const id = await insertMessage({ conversationId: convA, senderMemberId: memberHA, body: "hidden admin sees this" });
-    const deadline = Date.now() + 10_000;
-    while (events.length === 0 && Date.now() < deadline) await delay(250);
+    const ids: string[] = [];
+    const deadline = Date.now() + 20_000;
+    while (events.length === 0 && Date.now() < deadline) {
+      ids.push(await insertMessage({ conversationId: convA, senderMemberId: memberHA, body: `hidden admin sees ${ids.length + 1}` }));
+      await delay(1_500);
+    }
     await channel.unsubscribe();
-    void id;
     expect(events.length).toBeGreaterThan(0);
+    const ev = events[0] as { new?: { id?: string } };
+    void ev;
+    expect(ids).toContain(ev.new?.id);
   });
 
   it("hidden admin internal role is never projected to the client", async () => {
@@ -301,5 +358,61 @@ describe.skipIf(!hasEnv)("Realtime authorization", () => {
     for (const id of sent) expect(ids).toContain(id);
     expect(reconciled.length).toBeGreaterThanOrEqual(sent.length);
     expect(reconciled.find((m) => m.id === sent[0])?.body).toBe("missed message 1");
+  });
+
+  it("member joins the private channel and receives typing broadcasts", async () => {
+    const a = await signIn(`bp-a-${randomUUID()}@famora.test`);
+    const b = await signIn(`bp-b-${randomUUID()}@famora.test`);
+    await addMember({ userId: a.userId, familyId: familyA, conversationId: convA, internalRole: "MEMBER" });
+    await addMember({ userId: b.userId, familyId: familyA, conversationId: convA, internalRole: "MEMBER" });
+    const topic = `family:${familyA}:chat`;
+
+    const sender = await subscribePrivate(a.client, topic, "typing");
+    const receiver = await subscribePrivate(b.client, topic, "typing");
+    expect(sender.statuses.some((s) => s.startsWith("SUBSCRIBED"))).toBe(true);
+    expect(receiver.statuses.some((s) => s.startsWith("SUBSCRIBED"))).toBe(true);
+
+    sendTypingBroadcast(sender.channel, {
+      conversationId: convA,
+      memberId: `bm-${randomUUID()}`,
+      displayName: "Banner",
+      isTyping: true,
+    });
+    const deadline = Date.now() + 10_000;
+    while (receiver.events.length === 0 && Date.now() < deadline) await delay(250);
+    await sender.channel.unsubscribe();
+    await receiver.channel.unsubscribe();
+    expect(receiver.events.length).toBeGreaterThan(0);
+    const ev = receiver.events[0] as { payload?: TypingBroadcast };
+    expect(ev.payload?.isTyping).toBe(true);
+  });
+
+  it("non-member cannot join the private channel", async () => {
+    const outsider = await signIn(`bp-s-${randomUUID()}@famora.test`);
+    const { channel, events, statuses } = await subscribePrivate(
+      outsider.client,
+      `family:${familyA}:chat`,
+      "typing",
+    );
+    await channel.unsubscribe();
+    expect(events.length).toBe(0);
+    expect(statuses.some((s) => s.startsWith("SUBSCRIBED"))).toBe(false);
+    expect(statuses.some((s) => s.startsWith("CHANNEL_ERROR"))).toBe(true);
+  });
+
+  it("member cannot join another family's private channel", async () => {
+    const other = await signIn(`bp-o-${randomUUID()}@famora.test`);
+    await addMember({ userId: other.userId, familyId: familyB, conversationId: convB, internalRole: "MEMBER" });
+
+    // Allowed on its own family's topic…
+    const own = await subscribePrivate(other.client, `family:${familyB}:chat`, "typing");
+    expect(own.statuses.some((s) => s.startsWith("SUBSCRIBED"))).toBe(true);
+
+    // …but denied on family A's.
+    const foreign = await subscribePrivate(other.client, `family:${familyA}:chat`, "typing");
+    await own.channel.unsubscribe();
+    await foreign.channel.unsubscribe();
+    expect(foreign.events.length).toBe(0);
+    expect(foreign.statuses.some((s) => s.startsWith("CHANNEL_ERROR"))).toBe(true);
   });
 });
