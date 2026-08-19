@@ -211,7 +211,7 @@ model User {
   language      String    @default("en")
   lastActiveAt  DateTime?
   createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  updatedAt     DateTime  @updatedAt @default(now())
 
   settings            UserSettings?
   devices             UserDevice[]
@@ -233,7 +233,7 @@ model UserSettings {
   appearanceJson    Json? // chat/agenda/notebook personal prefs
   quietHoursJson    Json? // notification schedules
   createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  updatedAt         DateTime @updatedAt @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -266,7 +266,7 @@ model Family {
   avatarPath  String?
   timezone    String   @default("UTC")
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  updatedAt   DateTime @updatedAt @default(now())
 
   settings        FamilySettings?
   members         FamilyMember[]
@@ -375,7 +375,7 @@ model FamilyMemberSettings {
   defaultAgendaView String   @default("month")
   preferencesJson   Json? // per-family chat/agenda/notebook prefs
   createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  updatedAt         DateTime @updatedAt @default(now())
 
   member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
@@ -454,7 +454,7 @@ model Conversation {
   type      ConversationType
   title     String? // for DMs display name (optional)
   createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  updatedAt DateTime         @updatedAt @default(now())
 
   family   Family               @relation(fields: [familyId], references: [id], onDelete: Cascade)
   members  ConversationMember[]
@@ -486,7 +486,7 @@ model Message {
   senderMemberId    String?     @db.Uuid // null for system messages
   type              MessageType @default(TEXT)
   body              String      @default("") @db.Text
-  replyToId         String?
+  replyToId         String?     @db.Uuid
   metadata          Json? // forwarded_from, poll reference, gif url…
   editedAt          DateTime?
   deletedAt         DateTime? // soft delete; null means active
@@ -680,7 +680,7 @@ model CalendarEvent {
   updatedByMemberId String?         @db.Uuid
   deletedAt         DateTime?
   createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  updatedAt         DateTime        @updatedAt @default(now())
 
   family    Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
   category  EventCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
@@ -735,7 +735,7 @@ model Task {
   completedAt         DateTime?
   deletedAt           DateTime?
   createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  updatedAt           DateTime     @updatedAt @default(now())
 
   family      Family           @relation(fields: [familyId], references: [id], onDelete: Cascade)
   parent      Task?            @relation("SubTasks", fields: [parentId], references: [id])
@@ -820,7 +820,7 @@ model NotebookPage {
   createdByMemberId String     @db.Uuid
   updatedByMemberId String?
   createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  updatedAt         DateTime   @updatedAt @default(now())
   deletedAt         DateTime?
 
   notebook Notebook              @relation(fields: [notebookId], references: [id], onDelete: Cascade)
@@ -962,7 +962,7 @@ model Announcement {
   updatedByMemberId String?
   deletedAt         DateTime?
   createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
+  updatedAt         DateTime             @updatedAt @default(now())
 
   family Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
   reads  AnnouncementRead[]
@@ -1026,7 +1026,7 @@ model Recipe {
   createdByMemberId String    @db.Uuid
   deletedAt         DateTime?
   createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  updatedAt         DateTime  @updatedAt @default(now())
 
   family   Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
   comments RecipeComment[]
@@ -1160,7 +1160,7 @@ model UserNotificationPreference {
   channel   NotificationChannel @default(IN_APP)
   enabled   Boolean             @default(true)
   createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
+  updatedAt DateTime            @updatedAt @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
