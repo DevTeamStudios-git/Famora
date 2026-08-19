@@ -17,6 +17,7 @@ import {
   togglePinMessage,
   toggleSaveMessage,
   fetchFamilyMessage,
+  fetchMessageBySideEffect,
 } from "@/server/actions/chat";
 import { toast } from "sonner";
 
@@ -49,10 +50,15 @@ export function ChatRoom({
   const [typers, setTypers] = React.useState<Record<string, string>>({});
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const isNearBottomRef = React.useRef(true);
+  const messagesRef = React.useRef<ChatMessage[]>(initialMessages);
   const channelRef = React.useRef<ReturnType<ReturnType<typeof getSupabaseBrowserClient>["channel"]> | null>(
     null,
   );
   const typingTimersRef = React.useRef(new Map<string, number>());
+
+  React.useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   function upsertMessage(next: ChatMessage) {
     setMessages((prev) => {
@@ -111,14 +117,44 @@ export function ChatRoom({
     channelRef.current?.send({ type: "broadcast", event: "typing", payload });
   }
 
-  // Realtime: the family chat table is written to via Prisma in server
-  // actions, but Supabase Realtime reads from the Postgres WAL, so it still
-  // sees every insert/update regardless of which client wrote it. Typing
-  // presence rides the same channel as a broadcast payload.
+  // Reactions and pins live in child tables, so a change never touches the
+  // `messages` row. When such a row changes, refetch the affected message if
+  // it is still on screen so reactions/pins update without a manual refresh.
+  // Reactions and pins live in child tables, so a change never touches the
+  // `messages` row. When such a row changes, refetch the affected message if
+  // it is still on screen so reactions/pins update without a manual refresh.
   React.useEffect(() => {
     let active = true;
     let channel: ReturnType<ReturnType<typeof getSupabaseBrowserClient>["channel"]> | null =
       null;
+
+    function refetchIfVisible(messageId: string | undefined) {
+      if (!messageId || !active) return;
+      if (!messagesRef.current.some((m) => m.id === messageId)) return;
+      void fetchFamilyMessage(messageId).then((msg) => {
+        if (msg && active) upsertMessage(msg);
+      });
+    }
+
+    // Reactions/pins: INSERT events carry the message id directly; DELETE
+    // events only carry the child row's primary key, so resolve it server-side.
+    function refreshFromSideEffect(
+      payload: { new?: { id?: string; messageId?: string }; old?: { id?: string } },
+      kind: "reaction" | "pin",
+    ) {
+      if (!active) return;
+      if (payload.new?.messageId) {
+        refetchIfVisible(payload.new.messageId);
+        return;
+      }
+      const rowId = payload.old?.id ?? payload.new?.id;
+      if (!rowId) return;
+      void fetchMessageBySideEffect(kind, rowId).then((msg) => {
+        if (msg && active && messagesRef.current.some((m) => m.id === msg.id)) {
+          upsertMessage(msg);
+        }
+      });
+    }
 
     try {
       const supabase = getSupabaseBrowserClient();
@@ -147,6 +183,28 @@ export function ChatRoom({
           if (typing.isTyping) setTyping(typing.memberId, typing.displayName);
           else clearTyping(typing.memberId);
         })
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: REALTIME_POSTGRES_TABLES.messageReactions,
+          },
+          (payload: { new?: { id?: string; messageId?: string }; old?: { id?: string } }) => {
+            refreshFromSideEffect(payload, "reaction");
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: REALTIME_POSTGRES_TABLES.pinnedMessages,
+          },
+          (payload: { new?: { id?: string; messageId?: string }; old?: { id?: string } }) => {
+            refreshFromSideEffect(payload, "pin");
+          },
+        )
         .subscribe((status: string) => {
           if (!active) return;
           channelRef.current = channel;

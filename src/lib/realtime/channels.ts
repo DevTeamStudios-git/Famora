@@ -20,6 +20,8 @@ export const REALTIME_POSTGRES_TABLES = {
   tasks: "tasks",
   notifications: "notifications",
   activity: "activity_events",
+  messageReactions: "message_reactions",
+  pinnedMessages: "pinned_messages",
 } as const;
 
 /** Family activity feed event types (§4). */

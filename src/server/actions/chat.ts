@@ -219,6 +219,30 @@ export async function fetchFamilyMessage(
   return getFamilyMessage(messageId, access.memberId);
 }
 
+/**
+ * Resolves a message from a side-effect row (delete events only carry the
+ * row's primary key, not the message id) and returns it in the same shape as
+ * `fetchFamilyMessage`, so clients can reconcile removed reactions/pins live.
+ */
+export async function fetchMessageBySideEffect(
+  kind: "reaction" | "pin",
+  id: string,
+): Promise<ChatMessage | null> {
+  const access = await requireAuthorized();
+  const row =
+    kind === "reaction"
+      ? await prisma.messageReaction.findUnique({
+          where: { id },
+          select: { messageId: true },
+        })
+      : await prisma.pinnedMessage.findUnique({
+          where: { id },
+          select: { messageId: true },
+        });
+  if (!row) return null;
+  return getFamilyMessage(row.messageId, access.memberId);
+}
+
 export async function toggleSaveMessage(messageId: string): Promise<ActionResult> {
   const access = await requireAuthorized();
 
