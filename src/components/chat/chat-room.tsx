@@ -18,6 +18,7 @@ import {
   toggleSaveMessage,
   fetchFamilyMessage,
   fetchMessageBySideEffect,
+  fetchRecentMessages,
 } from "@/server/actions/chat";
 import { toast } from "sonner";
 
@@ -35,7 +36,8 @@ type ChatRoomProps = {
   };
 };
 
-const TYPING_EXPIRY_MS = 4000;
+const TYPING_EXPIRY_MS = 7000;
+const TYPING_HEARTBEAT_MS = 3000;
 
 export function ChatRoom({
   familyId,
@@ -55,6 +57,8 @@ export function ChatRoom({
     null,
   );
   const typingTimersRef = React.useRef(new Map<string, number>());
+  const typingHeartbeatRef = React.useRef<number | null>(null);
+  const amTypingRef = React.useRef(false);
 
   React.useEffect(() => {
     messagesRef.current = messages;
@@ -107,15 +111,50 @@ export function ChatRoom({
     });
   }
 
-  function broadcastTyping(isTyping: boolean) {
-    const payload: TypingPayload = {
-      conversationId,
-      memberId: viewer.memberId,
-      displayName: viewer.displayName,
-      isTyping,
+  const sendTyping = React.useCallback(
+    (isTyping: boolean) => {
+      const payload: TypingPayload = {
+        conversationId,
+        memberId: viewer.memberId,
+        displayName: viewer.displayName,
+        isTyping,
+      };
+      channelRef.current?.send({ type: "broadcast", event: "typing", payload });
+    },
+    [conversationId, viewer.memberId, viewer.displayName],
+  );
+
+  // Re-broadcast "typing" on a heartbeat so the banner never lapses while the
+  // person is still typing; recipients expire stale indicators on their side.
+  const broadcastTyping = React.useCallback(
+    (isTyping: boolean) => {
+      amTypingRef.current = isTyping;
+      if (isTyping) {
+        sendTyping(true);
+        if (typingHeartbeatRef.current === null) {
+          typingHeartbeatRef.current = window.setInterval(() => {
+            if (amTypingRef.current) sendTyping(true);
+          }, TYPING_HEARTBEAT_MS);
+        }
+      } else {
+        if (typingHeartbeatRef.current !== null) {
+          window.clearInterval(typingHeartbeatRef.current);
+          typingHeartbeatRef.current = null;
+        }
+        sendTyping(false);
+      }
+    },
+    [sendTyping],
+  );
+
+  React.useEffect(() => {
+    return () => {
+      if (typingHeartbeatRef.current !== null) {
+        window.clearInterval(typingHeartbeatRef.current);
+        typingHeartbeatRef.current = null;
+      }
     };
-    channelRef.current?.send({ type: "broadcast", event: "typing", payload });
-  }
+  }, []);
 
   // Reactions and pins live in child tables, so a change never touches the
   // `messages` row. When such a row changes, refetch the affected message if
@@ -209,6 +248,13 @@ export function ChatRoom({
           if (!active) return;
           channelRef.current = channel;
           setConnected(status === "SUBSCRIBED");
+          if (status === "SUBSCRIBED") {
+            // Resync the full page on (re)connect so anything missed while the
+            // channel was reconnecting is reconciled without a manual refresh.
+            void fetchRecentMessages(conversationId).then((fresh) => {
+              if (fresh && active) setMessages(fresh);
+            });
+          }
         });
     } catch {
       // Supabase isn't configured in this environment (e.g. local dev without

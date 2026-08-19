@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma/client";
 import { getAccessState } from "@/lib/auth/session";
 import { hasPermission } from "@/lib/authorization/authorization";
 import { messageSchema } from "@/lib/validation/schemas";
-import { getOrCreateFamilyChatConversation, getFamilyMessage, type ChatMessage } from "@/server/queries/chat";
+import { getOrCreateFamilyChatConversation, getFamilyMessage, listFamilyMessages, type ChatMessage } from "@/server/queries/chat";
 import { z } from "zod";
 
 type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
@@ -241,6 +241,24 @@ export async function fetchMessageBySideEffect(
         });
   if (!row) return null;
   return getFamilyMessage(row.messageId, access.memberId);
+}
+
+/**
+ * Full list re-sync for a conversation. Used to reconcile anything missed
+ * while a realtime channel was reconnecting.
+ */
+export async function fetchRecentMessages(
+  conversationId: string,
+): Promise<ChatMessage[]> {
+  const access = await requireAuthorized();
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { familyId: true },
+  });
+  if (!conversation || conversation.familyId !== access.familyId) {
+    return [];
+  }
+  return listFamilyMessages(conversationId, access.memberId);
 }
 
 export async function toggleSaveMessage(messageId: string): Promise<ActionResult> {
