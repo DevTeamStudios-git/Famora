@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { Send, X, CornerUpLeft } from "lucide-react";
+import { Send, X, CornerUpLeft, Smile, Mic, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { EmojiPicker } from "@/components/chat/emoji-picker";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/server/queries/chat";
 
@@ -16,6 +17,31 @@ type MessageComposerProps = {
   onTypingChange?: (isTyping: boolean) => void;
 };
 
+type SpeechRecognitionLike = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+  onresult: ((event: {
+    resultIndex: number;
+    results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+  }) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+};
+
+function getSpeechRecognition(): SpeechRecognitionLike | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: new () => SpeechRecognitionLike;
+    webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+  };
+  const ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+  return ctor ? new ctor() : null;
+}
+
 export function MessageComposer({
   disabled,
   disabledReason,
@@ -26,9 +52,20 @@ export function MessageComposer({
 }: MessageComposerProps) {
   const [value, setValue] = React.useState("");
   const [sending, setSending] = React.useState(false);
+  const [dictating, setDictating] = React.useState(false);
+  const [dictationSupported, setDictationSupported] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = React.useRef<SpeechRecognitionLike | null>(null);
+  const transcriptRef = React.useRef("");
+  const baseRef = React.useRef("");
 
   const isTyping = value.trim().length > 0 && !sending && !disabled;
+
+  React.useEffect(() => {
+    queueMicrotask(() => {
+      setDictationSupported(getSpeechRecognition() !== null);
+    });
+  }, []);
 
   React.useEffect(() => {
     if (replyingTo) textareaRef.current?.focus();
@@ -38,9 +75,16 @@ export function MessageComposer({
     onTypingChange?.(isTyping);
   }, [isTyping, onTypingChange]);
 
+  React.useEffect(() => {
+    return () => {
+      recognitionRef.current?.abort();
+    };
+  }, []);
+
   async function handleSend() {
     const trimmed = value.trim();
     if (!trimmed || sending || disabled) return;
+    stopDictation();
     setSending(true);
     try {
       await onSend(trimmed);
@@ -57,6 +101,67 @@ export function MessageComposer({
       void handleSend();
     }
   }
+
+  function insertEmoji(emoji: string) {
+    const el = textareaRef.current;
+    const start = el?.selectionStart ?? value.length;
+    const end = el?.selectionEnd ?? value.length;
+    const next = value.slice(0, start) + emoji + value.slice(end);
+    setValue(next);
+    requestAnimationFrame(() => {
+      const cursor = start + emoji.length;
+      el?.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  function startDictation() {
+    const recognition = getSpeechRecognition();
+    if (!recognition) return;
+    recognitionRef.current = recognition;
+    baseRef.current = value;
+    transcriptRef.current = "";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    if (typeof navigator !== "undefined" && navigator.language) {
+      recognition.lang = navigator.language;
+    }
+    recognition.onresult = (event) => {
+      let interim = "";
+      let finalDelta = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) finalDelta += transcript + " ";
+        else interim = transcript;
+      }
+      transcriptRef.current += finalDelta;
+      const committed = transcriptRef.current.trim();
+      let next = baseRef.current.trimEnd();
+      if (committed) next += " " + committed;
+      if (interim) next = next.trimEnd() + " " + interim.trimEnd();
+      setValue(next);
+    };
+    recognition.onerror = () => {
+      recognition.abort();
+    };
+    recognition.onend = () => {
+      setDictating(false);
+      textareaRef.current?.focus();
+    };
+    setDictating(true);
+    try {
+      recognition.start();
+    } catch {
+      // Already started or unsupported in this browser/context.
+      setDictating(false);
+    }
+  }
+
+  function stopDictation() {
+    recognitionRef.current?.stop();
+    setDictating(false);
+  }
+
+  const actionsDisabled = Boolean(disabled || sending);
 
   return (
     <div className="border-t border-border bg-card p-3">
@@ -104,19 +209,54 @@ export function MessageComposer({
             "max-h-40 min-h-9 flex-1 resize-none py-2",
           )}
         />
-        <Button
-          type="button"
-          size="icon"
-          disabled={disabled || sending || !value.trim()}
-          loading={sending}
-          onClick={() => void handleSend()}
-          aria-label="Send message"
-        >
-          <Send className="h-4 w-4" aria-hidden />
-        </Button>
+        <div className="flex shrink-0 items-end gap-0.5">
+          <EmojiPicker
+            align="end"
+            trigger={
+              <Button
+                type="button"
+                variant="ghost"
+                size="iconSm"
+                disabled={actionsDisabled}
+                aria-label="Insert emoji"
+              >
+                <Smile className="h-4 w-4" aria-hidden />
+              </Button>
+            }
+            onSelect={insertEmoji}
+          />
+          {dictationSupported ? (
+            <Button
+              type="button"
+              variant={dictating ? "secondary" : "ghost"}
+              size="iconSm"
+              disabled={actionsDisabled}
+              onClick={() => (dictating ? stopDictation() : startDictation())}
+              aria-label={dictating ? "Stop voice input" : "Start voice input"}
+            >
+              {dictating ? (
+                <Square className="h-4 w-4" aria-hidden />
+              ) : (
+                <Mic className="h-4 w-4" aria-hidden />
+              )}
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            size="icon"
+            disabled={actionsDisabled || !value.trim()}
+            loading={sending}
+            onClick={() => void handleSend()}
+            aria-label="Send message"
+          >
+            <Send className="h-4 w-4" aria-hidden />
+          </Button>
+        </div>
       </div>
       <p className="mt-1 px-1 text-[11px] text-muted-foreground">
-        Enter to send · Shift + Enter for a new line
+        {dictating
+          ? "Listening… tap the stop button when you're done"
+          : "Enter to send · Shift + Enter for a new line"}
       </p>
     </div>
   );

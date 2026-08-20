@@ -12,10 +12,12 @@ import {
   Bookmark,
   BookmarkCheck,
   MessagesSquare,
+  SmilePlus,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage, initialsOf } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { EmojiPicker, QUICK_REACTIONS } from "@/components/chat/emoji-picker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,8 +38,6 @@ import {
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/server/queries/chat";
 import { toast } from "sonner";
-
-const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "🙏"];
 
 type MessageItemProps = {
   message: ChatMessage;
@@ -220,6 +220,21 @@ export function MessageItem({
                 </button>
               ))
             : null}
+          {canReact ? (
+            <EmojiPicker
+              align="end"
+              onSelect={(emoji) => void onReact(message.id, emoji)}
+              trigger={
+                <button
+                  type="button"
+                  className="hidden rounded-md p-1 text-sm hover:bg-accent sm:inline-flex"
+                  aria-label="React with another emoji"
+                >
+                  <SmilePlus className="h-4 w-4" aria-hidden />
+                </button>
+              }
+            />
+          ) : null}
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuTrigger asChild>
               <Button
