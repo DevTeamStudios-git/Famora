@@ -32,9 +32,20 @@ export type VoiceRecorderState =
 const WAVEFORM_LENGTH = 24;
 
 export function useVoiceRecorder() {
-  const [state, setState] = React.useState<VoiceRecorderState>(
-    typeof MediaRecorder === "undefined" ? "unsupported" : "idle",
+  // Client-only capability check via useSyncExternalStore so SSR and the first
+  // client render agree (both use getServerSnapshot => "supported"), avoiding a
+  // hydration mismatch when `typeof MediaRecorder` differs between server and
+  // browser. Users without a supported recorder drop to "unsupported" right
+  // after hydration (and again on a mic click in start()).
+  const isSupported = React.useSyncExternalStore<boolean>(
+    () => () => {},
+    () => typeof MediaRecorder !== "undefined" && pickSupportedMimeType() !== null,
+    () => true,
   );
+  const [state, setState] = React.useState<VoiceRecorderState>("idle");
+  if (!isSupported && state !== "unsupported") {
+    setState("unsupported");
+  }
   const [durationMs, setDurationMs] = React.useState(0);
   // Rolling amplitude history (0-1 each) for a lightweight live waveform.
   // Owned here (not derived in the UI component) since accumulating a
