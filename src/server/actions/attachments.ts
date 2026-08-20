@@ -24,7 +24,6 @@ import { statUploadedObject, sniffUploadedMimeType, deleteUploadedObjects } from
 import {
   categoryForMime,
   maxSizeForCategory,
-  sanitizeFileName,
   CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
   CHAT_VOICE_MESSAGE_MAX_SIZE,
   VOICE_MESSAGE_MAX_DURATION_SECONDS,
@@ -69,26 +68,22 @@ async function requireAuthorized() {
 }
 
 /**
- * Server-issued staging record for one direct-to-Storage upload. The client
- * must call this to learn the object path (it never builds paths itself), and
- * the resulting chat_upload_staging row binds the object to the caller's own
- * member/family. finalizeChatMessage re-checks that binding for every staged
- * path, so a member can never finalize an object staged by someone else — the
- * path is not a capability (authorization never depends on guessing a UUID).
+ * Issues a fresh, family-scoped Storage path for one file and records who's
+ * uploading it. The client uploads to exactly this path — nothing else.
+ * This binding is what lets finalizeChatMessage() verify "the caller is the
+ * one who staged this object" instead of trusting that a syntactically
+ * family-scoped path was actually theirs (a random UUID is hard to guess,
+ * but authorization must not rest on secrecy of a path).
  */
 export async function createUploadStaging(
   fileName: string,
-): Promise<ActionResult<{ path: string; fileName: string }>> {
+): Promise<ActionResult<{ path: string }>> {
   const access = await requireAuthorized();
   if (!hasPermission(access.membership, "chat.send")) {
     return { ok: false, error: "You don't have permission to send messages." };
   }
 
-  const parsed = z.string().trim().min(1).max(255).safeParse(fileName);
-  if (!parsed.success) {
-    return { ok: false, error: "Invalid file name." };
-  }
-  const safeName = sanitizeFileName(parsed.data) || "file";
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180) || "file";
   const draftId = crypto.randomUUID();
   const path = `${access.familyId}/chat/${draftId}/${safeName}`;
 
@@ -97,18 +92,52 @@ export async function createUploadStaging(
       familyId: access.familyId,
       memberId: access.memberId,
       storagePath: path,
+      fileName: safeName,
     },
   });
 
-  return { ok: true, data: { path, fileName: safeName } };
+  return { ok: true, data: { path } };
 }
 
-/** Rejects any path that doesn't belong to the caller's own family/chat prefix. */
-function assertOwnedPath(path: string, familyId: string) {
-  const expectedPrefix = `${familyId}/chat/`;
-  if (!path.startsWith(expectedPrefix)) {
-    throw new Error("Attachment path does not belong to this family.");
+/** Cancel path: drops the staging record for an upload the user removed before sending. */
+export async function cancelUploadStaging(path: string): Promise<ActionResult> {
+  const access = await requireAuthorized();
+  await prisma.chatUploadStaging.deleteMany({
+    where: { storagePath: path, memberId: access.memberId },
+  });
+  return { ok: true, data: undefined };
+}
+
+/**
+ * Verifies every claimed path was actually staged by *this* member, in
+ * *this* family — not just that it looks like a family-scoped path. Without
+ * this, anyone who learned another member's staged path (e.g. it leaked via
+ * logs, a shared screen, a browser extension) could submit it to
+ * finalizeChatMessage() and have it attached to a message they didn't
+ * upload. A random UUID path is hard to guess, but authorization must not
+ * rest on secrecy of a path — see createUploadStaging() above.
+ */
+async function assertOwnedStagedPaths(
+  paths: string[],
+  access: { familyId: string; memberId: string },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (paths.length === 0) return { ok: true };
+  const rows: { storagePath: string; familyId: string; memberId: string }[] =
+    await prisma.chatUploadStaging.findMany({
+      where: { storagePath: { in: paths } },
+      select: { storagePath: true, familyId: true, memberId: true },
+    });
+  const byPath = new Map<string, { storagePath: string; familyId: string; memberId: string }>(
+    rows.map((r) => [r.storagePath, r]),
+  );
+
+  for (const path of paths) {
+    const staged = byPath.get(path);
+    if (!staged || staged.memberId !== access.memberId || staged.familyId !== access.familyId) {
+      return { ok: false, error: "One of those attachments couldn't be verified. Please re-upload." };
+    }
   }
+  return { ok: true };
 }
 
 type VerifiedItem = {
@@ -162,31 +191,10 @@ export async function finalizeChatMessage(
     ...(input.voice ? [input.voice.path] : []),
   ];
 
-  try {
-    for (const path of allPaths) assertOwnedPath(path, access.familyId);
-  } catch (err) {
+  const ownership = await assertOwnedStagedPaths(allPaths, access);
+  if (!ownership.ok) {
     await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
-    return { ok: false, error: err instanceof Error ? err.message : "Invalid attachment." };
-  }
-
-  // --- Ownership: every staged object must be bound to the caller ---
-  const staged = await prisma.chatUploadStaging.findMany({
-    where: { storagePath: { in: allPaths }, status: "STAGED" },
-    select: { storagePath: true, memberId: true, familyId: true },
-  });
-  const ownPaths = new Set(
-    staged
-      .filter((s) => s.memberId === access.memberId && s.familyId === access.familyId)
-      .map((s) => s.storagePath),
-  );
-  for (const path of allPaths) {
-    if (!ownPaths.has(path)) {
-      await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
-      return {
-        ok: false,
-        error: "Attachment wasn't staged by you — upload through the chat composer.",
-      };
-    }
+    return { ok: false, error: ownership.error };
   }
 
   // --- Verify every object against Storage itself (the security boundary) ---
@@ -273,7 +281,7 @@ export async function finalizeChatMessage(
             familyId: access.familyId,
             bucket: STORAGE_BUCKET,
             storagePath: item.path,
-            fileName: sanitizeFileName(item.fileName),
+            fileName: item.fileName,
             mimeType: item.mimeType,
             size: item.size,
             category: item.category,
@@ -284,15 +292,16 @@ export async function finalizeChatMessage(
         });
       }
 
+      // Staging rows are single-use — clear them now that the objects they
+      // guarded are real MessageAttachments.
+      if (allPaths.length > 0) {
+        await tx.chatUploadStaging.deleteMany({ where: { storagePath: { in: allPaths } } });
+      }
+
       return message;
     });
 
     const fresh = await getFamilyMessage(created.id, access.memberId);
-    // The staged bindings have served their purpose — finalization succeeded,
-    // so the uploads are now owned by the sent message.
-    await prisma.chatUploadStaging
-      .deleteMany({ where: { storagePath: { in: allPaths } } })
-      .catch(() => undefined);
     return fresh
       ? { ok: true, data: fresh }
       : { ok: false, error: "Message sent." };

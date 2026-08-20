@@ -114,12 +114,3 @@ export function quickValidateFile(file: {
   }
   return { ok: true, category };
 }
-
-/**
- * Makes a user-supplied file name safe for a Storage path segment. Shared by
- * the client (path construction is owned by the server action, but the name
- * still flows through the same sanitizer) and the server (createUploadStaging).
- */
-export function sanitizeFileName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180);
-}

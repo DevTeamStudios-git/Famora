@@ -516,7 +516,7 @@ describe.skipIf(!hasEnv)("Realtime authorization", () => {
       familyId: familyA,
       memberId: memberA,
       storagePath: path,
-      status: "STAGED",
+      fileName: "me.png",
     });
     expect(ins.error).toBeNull();
 
@@ -542,6 +542,7 @@ describe.skipIf(!hasEnv)("Realtime authorization", () => {
       familyId: familyA,
       memberId: memberA,
       storagePath: `${familyA}/chat/${randomUUID()}/nope.png`,
+      fileName: "nope.png",
     });
     expect(forge.error).not.toBeNull();
 
@@ -551,6 +552,7 @@ describe.skipIf(!hasEnv)("Realtime authorization", () => {
       familyId: familyA,
       memberId: memberB,
       storagePath: `${familyA}/chat/${randomUUID()}/foreign.png`,
+      fileName: "foreign.png",
     });
     expect(foreign.error).not.toBeNull();
 

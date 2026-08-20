@@ -8,7 +8,10 @@ import {
   CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
   type AttachmentCategory,
 } from "@/lib/validation/attachments";
-import { createUploadStaging } from "@/server/actions/attachments";
+import {
+  createUploadStaging,
+  cancelUploadStaging,
+} from "@/server/actions/attachments";
 
 export type StagedAttachment = {
   id: string;
@@ -106,25 +109,27 @@ export function useAttachmentUpload() {
         continue;
       }
 
-      const path = await createUploadStaging(file.name).then((r) =>
-        r.ok ? r.data.path : null,
-      );
-      if (!path) {
+      // Ask the server to mint the path and bind it to this member — this is
+      // the ownership record finalizeChatMessage() checks against later, so
+      // authorization doesn't rest on the path itself being hard to guess.
+      const staging = await createUploadStaging(file.name);
+      if (!staging.ok) {
         setAttachments((prev) => [
           ...prev,
           {
             id,
             file,
-            category: "DOCUMENT",
+            category: check.category,
             status: "error",
             progress: 0,
-            error: "Couldn't start the upload — try again.",
+            error: staging.error,
             path: "",
             caption: "",
           },
         ]);
         continue;
       }
+      const path = staging.data.path;
       const previewUrl =
         check.category === "IMAGE" || check.category === "VIDEO"
           ? URL.createObjectURL(file)
@@ -157,6 +162,8 @@ export function useAttachmentUpload() {
         .catch((err: Error) => {
           if (err.message !== "canceled") {
             update(id, { status: "error", error: err.message });
+          } else {
+            void cancelUploadStaging(path);
           }
         })
         .finally(() => xhrsRef.current.delete(id));
@@ -170,14 +177,16 @@ export function useAttachmentUpload() {
     setAttachments((prev) => {
       const target = prev.find((a) => a.id === id);
       if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
-      // Best-effort cleanup of an already-uploaded-but-unsent object. Safe to
-      // fire-and-forget: storage RLS (migration 0009) only allows this while the
-      // upload is unfinalized, and if it fails the object is simply orphaned
-      // storage, not a security or correctness problem.
-      if (target?.status === "uploaded" && target.path) {
-        void getSupabaseBrowserClient()
-          .storage.from(STORAGE_BUCKET)
-          .remove([target.path]);
+      if (target?.path) {
+        // Best-effort cleanup, fire-and-forget: drop the ownership record and
+        // the Storage object itself. Storage RLS (0008) only allows the
+        // object delete while unfinalized, matching the staging row's
+        // lifetime, so both fail closed together rather than leaving one
+        // without the other.
+        void cancelUploadStaging(target.path);
+        if (target.status === "uploaded") {
+          void getSupabaseBrowserClient().storage.from(STORAGE_BUCKET).remove([target.path]);
+        }
       }
       return prev.filter((a) => a.id !== id);
     });

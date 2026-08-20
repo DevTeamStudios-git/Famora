@@ -12,7 +12,7 @@ import {
   getUploadAccessToken,
   uploadWithProgress,
 } from "@/components/chat/use-attachment-upload";
-import { createUploadStaging } from "@/server/actions/attachments";
+import { createUploadStaging, cancelUploadStaging } from "@/server/actions/attachments";
 import { extensionForVoiceMime } from "@/lib/validation/attachments";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/server/queries/chat";
@@ -136,21 +136,19 @@ export function MessageComposer({
       toast.error("You need to be signed in to send a voice message.");
       return;
     }
-    const staged = await createUploadStaging(`voice-message.${extensionForVoiceMime(blob.type)}`);
-    if (!staged.ok) {
-      toast.error(staged.error ?? "Couldn't start the upload.");
+    const fileName = `voice-message.${extensionForVoiceMime(blob.type)}`;
+    const staging = await createUploadStaging(fileName);
+    if (!staging.ok) {
+      toast.error(staging.error);
       return;
     }
+    const path = staging.data.path;
 
     try {
-      await uploadWithProgress({
-        path: staged.data.path,
-        file: blob,
-        accessToken,
-        onProgress: () => {},
-      }).promise;
+      await uploadWithProgress({ path, file: blob, accessToken, onProgress: () => {} }).promise;
     } catch {
       toast.error("Couldn't upload the voice message. Please try again.");
+      void cancelUploadStaging(path);
       return;
     }
 
@@ -159,7 +157,7 @@ export function MessageComposer({
       await onSend({
         body: "",
         attachments: [],
-        voice: { path: staged.data.path, fileName: staged.data.fileName, durationMs },
+        voice: { path, fileName, durationMs },
       });
     } finally {
       setSending(false);

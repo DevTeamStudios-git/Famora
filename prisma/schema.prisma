@@ -539,25 +539,27 @@ model MessageAttachment {
   @@map("message_attachments")
 }
 
-// Transient record binding a direct-to-Storage chat upload to the member/family
-// that staged it. Rows are created by createUploadStaging() before the client
-// uploads the object, verified by finalizeChatMessage() for ownership, and
-// deleted once the send succeeds — or reclaimed by the storage cleanup policy
-// when an upload is abandoned. The row makes the object path a capability for
-// the staging member only; authorization never relies on guessing a UUID.
+// Binds a staged (uploaded-but-not-yet-sent) chat attachment to the member
+// who uploaded it. Exists specifically so finalizeChatMessage() can enforce
+// "the caller is the one who uploaded this object" instead of trusting that
+// a syntactically-valid, family-scoped path was actually theirs — a random
+// UUID path is hard to guess, but authorization must not rest on secrecy of
+// a path. Rows are deleted once the upload is finalized into a real
+// MessageAttachment (or abandoned/cancelled); a short-lived table, not
+// meant to accumulate.
 model ChatUploadStaging {
   id          String   @id @default(uuid()) @db.Uuid
   familyId    String   @db.Uuid
   memberId    String   @db.Uuid
   storagePath String   @unique
-  status      String   @default("STAGED")
+  fileName    String
   createdAt   DateTime @default(now())
 
   family Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
   member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
+  @@index([familyId])
   @@index([memberId])
-  @@index([createdAt])
   @@map("chat_upload_staging")
 }
 
