@@ -289,6 +289,10 @@ describe.skipIf(!hasEnv)("Realtime authorization", () => {
     const ha = await signIn(`hap-${randomUUID()}@famora.test`);
     const memberHA = await addMember({ userId: ha.userId, familyId: familyA, conversationId: convA, internalRole: "HIDDEN_ADMIN" });
     const id = await insertMessage({ conversationId: convA, senderMemberId: memberHA, body: "projection check" });
+    await pg.query(
+      `insert into message_reactions (id, "messageId", "memberId", emoji) values (gen_random_uuid(), $1, $2, '❤️')`,
+      [id, memberHA],
+    );
     const message: ChatMessage | null = await getFamilyMessage(id, memberHA);
     expect(message).not.toBeNull();
     // Server projection exposes only the safe shape: id/displayRole/user.
@@ -297,6 +301,17 @@ describe.skipIf(!hasEnv)("Realtime authorization", () => {
     );
     expect(message!.sender).not.toHaveProperty("internalRole");
     expect(message!.sender).not.toHaveProperty("userId");
+    // Reaction hover data carries the same public-safe member shape.
+    expect(message!.reactions[0]).toEqual(
+      expect.objectContaining({
+        emoji: "❤️",
+        count: 1,
+        reactedByMe: true,
+        members: [expect.objectContaining({ memberId: memberHA, displayName: expect.any(String), avatarUrl: null })],
+      }),
+    );
+    expect(JSON.stringify(message!.reactions)).not.toContain("internalRole");
+    expect(JSON.stringify(message!.reactions)).not.toContain("userId");
   });
 
   it("reactions respect conversation membership", async () => {

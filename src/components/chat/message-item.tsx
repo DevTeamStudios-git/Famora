@@ -35,6 +35,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/server/queries/chat";
 import { toast } from "sonner";
@@ -186,20 +191,28 @@ export function MessageItem({
         )}
 
         {message.reactions.length > 0 ? (
-          <div className="mt-1 flex flex-wrap gap-1">
+          <div className="mt-1 flex max-w-full flex-wrap gap-1">
             {message.reactions.map((r) => (
-              <button
-                key={r.emoji}
-                type="button"
-                disabled={!canReact}
-                onClick={() => void onReact(message.id, r.emoji)}
-                className={cn(
-                  "rounded-full border border-border px-1.5 py-0.5 text-xs",
-                  r.reactedByMe ? "bg-primary/10 border-primary/40" : "bg-muted",
-                )}
-              >
-                {r.emoji} {r.count}
-              </button>
+              <Tooltip key={r.emoji}>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (canReact) void onReact(message.id, r.emoji);
+                    }}
+                    className={cn(
+                      "cursor-default rounded-full border border-border px-1.5 py-0.5 text-xs",
+                      r.reactedByMe ? "bg-primary/10 border-primary/40" : "bg-muted",
+                    )}
+                    aria-label={`${r.emoji} reacted by ${r.members.map((m) => m.displayName).join(", ")}`}
+                  >
+                    {r.emoji} {r.count}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" align="center">
+                  {r.members.map((m) => m.displayName).join(", ")}
+                </TooltipContent>
+              </Tooltip>
             ))}
           </div>
         ) : null}

@@ -57,7 +57,7 @@ export type ChatMessage = {
   deletedAt: string | null;
   sender: MessageSender | null;
   replyTo: { id: string; body: string; sender: MessageSender | null } | null;
-  reactions: { emoji: string; count: number; reactedByMe: boolean }[];
+  reactions: { emoji: string; count: number; reactedByMe: boolean; members: MessageSender[] }[];
   isPinned: boolean;
   isSavedByMe: boolean;
   isMine: boolean;
@@ -86,6 +86,23 @@ function senderInclude() {
     replyTo: {
       include: {
         sender: {
+          select: {
+            id: true,
+            displayRole: true,
+            user: { select: { displayName: true, avatarUrl: true } },
+          },
+        },
+      },
+    },
+  };
+}
+
+/** Reaction rows joined with a public-safe member profile (never internalRole). */
+function reactionInclude() {
+  return {
+    reactions: {
+      include: {
+        member: {
           select: {
             id: true,
             displayRole: true,
@@ -142,17 +159,19 @@ type ChatRow = {
     deletedAt: Date | null;
     sender: SenderFlat | null;
   } | null;
-  reactions: { emoji: string; memberId: string }[];
+  reactions: { emoji: string; memberId: string; member: SenderFlat }[];
   pinnedMessage: { id: string } | null;
   savedMessages: { id: string }[];
 };
 
 /** Projects a DB row into the UI-safe ChatMessage shape (never internalRole). */
 function toChatMessage(row: ChatRow, viewerMemberId: string): ChatMessage {
-  const reactionMap = new Map<string, { count: number; reactedByMe: boolean }>();
+  const reactionMap = new Map<string, { count: number; reactedByMe: boolean; members: MessageSender[] }>();
   for (const reaction of row.reactions) {
-    const entry = reactionMap.get(reaction.emoji) ?? { count: 0, reactedByMe: false };
+    const entry = reactionMap.get(reaction.emoji) ?? { count: 0, reactedByMe: false, members: [] };
     entry.count += 1;
+    const member = toSender(reaction.member);
+    if (member) entry.members.push(member);
     if (reaction.memberId === viewerMemberId) entry.reactedByMe = true;
     reactionMap.set(reaction.emoji, entry);
   }
@@ -177,6 +196,7 @@ function toChatMessage(row: ChatRow, viewerMemberId: string): ChatMessage {
       emoji,
       count: v.count,
       reactedByMe: v.reactedByMe,
+      members: v.members,
     })),
     isPinned: Boolean(row.pinnedMessage),
     isSavedByMe: row.savedMessages.length > 0,
@@ -195,7 +215,7 @@ export async function listFamilyMessages(
     take: MESSAGE_PAGE_SIZE,
     include: {
       ...senderInclude(),
-      reactions: true,
+      ...reactionInclude(),
       pinnedMessage: true,
       savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },
     },
@@ -214,7 +234,7 @@ export async function listPinnedMessages(
     orderBy: { pinnedMessage: { createdAt: "desc" } },
     include: {
       ...senderInclude(),
-      reactions: true,
+      ...reactionInclude(),
       pinnedMessage: true,
       savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },
     },
@@ -232,7 +252,7 @@ export async function getFamilyMessage(
     where: { id: messageId },
     include: {
       ...senderInclude(),
-      reactions: true,
+      ...reactionInclude(),
       pinnedMessage: true,
       savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },
     },
