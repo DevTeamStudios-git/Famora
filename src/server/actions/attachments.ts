@@ -24,10 +24,10 @@ import { statUploadedObject, sniffUploadedMimeType, deleteUploadedObjects } from
 import {
   categoryForMime,
   maxSizeForCategory,
+  isVoiceRecordingMimeType,
   CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
   CHAT_VOICE_MESSAGE_MAX_SIZE,
   VOICE_MESSAGE_MAX_DURATION_SECONDS,
-  ALLOWED_VOICE_MIME_TYPES,
   type AttachmentCategory,
 } from "@/lib/validation/attachments";
 
@@ -220,7 +220,7 @@ export async function finalizeChatMessage(
       await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
       return { ok: false, error: result.error };
     }
-    if (!ALLOWED_VOICE_MIME_TYPES.includes(result.mimeType as (typeof ALLOWED_VOICE_MIME_TYPES)[number])) {
+    if (!isVoiceRecordingMimeType(result.mimeType)) {
       await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
       return { ok: false, error: "That doesn't look like a valid voice recording." };
     }

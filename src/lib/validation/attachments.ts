@@ -56,6 +56,29 @@ export const ALLOWED_VOICE_MIME_TYPES = [
   "audio/wav",
 ] as const;
 
+const VOICE_VIDEO_FALLBACK_TYPES = ["video/webm", "video/mp4"] as const;
+/**
+ * True if a *sniffed* MIME is a valid voice-recording container.
+ *
+ * file-type reports WebM and MP4 as `video/webm` / `video/mp4` even for an
+ * audio-only MediaRecorder clip (a `.webm`/`.mp4` recording is a real audio
+ * file multiplexed into an audio/video container): the EBML/ISO-BMFF format
+ * headers simply don't carry an audio-vs-video flag, so the sniffer falls
+ * back to the video variant. Rejecting those would break voice messages on
+ * every browser that records webm (Chrome/Firefox) or mp4 (Safari).
+ *
+ * Accepting the two container variants is not "any video passes": voice is
+ * additionally bound by an ownership-checked path minted as `voice-message.*`
+ * and a hard server-side size cap (CHAT_VOICE_MESSAGE_MAX_SIZE), so the
+ * gate here stays narrow — not a blanket video allowlist.
+ */
+export function isVoiceRecordingMimeType(mime: string): boolean {
+  const audioTypes = ALLOWED_VOICE_MIME_TYPES as readonly string[];
+  return audioTypes.includes(mime) || VOICE_VIDEO_FALLBACK_TYPES.includes(
+    mime as (typeof VOICE_VIDEO_FALLBACK_TYPES)[number],
+  );
+}
+
 /** Picks a reasonable file extension for a recorded voice blob's MIME type. */
 export function extensionForVoiceMime(mimeType: string): string {
   const base = mimeType.split(";")[0]?.trim();
