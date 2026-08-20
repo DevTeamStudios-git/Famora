@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma/client";
 import { getAccessState } from "@/lib/auth/session";
 import { hasPermission } from "@/lib/authorization/authorization";
 import { messageSchema } from "@/lib/validation/schemas";
-import { getOrCreateFamilyChatConversation, getFamilyMessage, listFamilyMessages, type ChatMessage } from "@/server/queries/chat";
+import { getOrCreateFamilyChatConversation, getFamilyMessage, listFamilyMessages, listPinnedMessages, type ChatMessage } from "@/server/queries/chat";
 import { z } from "zod";
 
 type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
@@ -255,10 +255,27 @@ export async function fetchRecentMessages(
     where: { id: conversationId },
     select: { familyId: true },
   });
-  if (!conversation || conversation.familyId !== access.familyId) {
+if (!conversation || conversation.familyId !== access.familyId) {
     return [];
   }
   return listFamilyMessages(conversationId, access.memberId);
+}
+
+/**
+ * Full pinned-message list for a conversation, most recently pinned first.
+ * Used by the chat room's pinned section (authorization-scoped server-side,
+ * then projected — pinned rows never carry hidden admin data).
+ */
+export async function fetchPinnedMessages(conversationId: string): Promise<ChatMessage[]> {
+  const access = await requireAuthorized();
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { familyId: true },
+  });
+  if (!conversation || conversation.familyId !== access.familyId) {
+    return [];
+  }
+  return listPinnedMessages(conversationId, access.memberId);
 }
 
 export async function toggleSaveMessage(messageId: string): Promise<ActionResult> {

@@ -16,6 +16,7 @@ import { env as nextEnv } from "@/lib/env";
 import {
   listFamilyMessages,
   getFamilyMessage,
+  listPinnedMessages,
   type ChatMessage,
 } from "@/server/queries/chat";
 
@@ -414,5 +415,76 @@ describe.skipIf(!hasEnv)("Realtime authorization", () => {
     await foreign.channel.unsubscribe();
     expect(foreign.events.length).toBe(0);
     expect(foreign.statuses.some((s) => s.startsWith("CHANNEL_ERROR"))).toBe(true);
+  });
+
+  it("soft-deleted messages stream an UPDATE so the removal shows live", async () => {
+    const a = await signIn(`sd-${randomUUID()}@famora.test`);
+    const memberA = await addMember({ userId: a.userId, familyId: familyA, conversationId: convA, internalRole: "MEMBER" });
+    const { channel, events } = await subscribePostgres(a.client, `family:${familyA}:chat`, "messages", `conversationId=eq.${convA}`);
+
+    const msgId = await insertMessage({ conversationId: convA, senderMemberId: memberA, body: "delete me live" });
+    // Mirrors deleteFamilyMessage's UPDATE (soft delete, body cleared).
+    await pg.query(`update messages set "deletedAt" = now(), "deletedByMemberId" = $1, body = '' where id = $2`, [memberA, msgId]);
+
+    const deadline = Date.now() + 20_000;
+    let seen = false;
+    while (!seen && Date.now() < deadline) {
+      seen = (events as { eventType?: string; new?: { id?: string; deletedAt?: string } }[]).some(
+        (e) => e.eventType === "UPDATE" && e.new?.id === msgId && Boolean(e.new?.deletedAt),
+      );
+      if (!seen) await delay(1_000);
+    }
+    await channel.unsubscribe();
+    expect(seen).toBe(true);
+  });
+
+  it("removing a reaction delivers a DELETE event (PK-only old) so the client full-reconciles", async () => {
+    const a = await signIn(`rd-${randomUUID()}@famora.test`);
+    const memberA = await addMember({ userId: a.userId, familyId: familyA, conversationId: convA, internalRole: "MEMBER" });
+    const { channel, events } = await subscribePostgres(a.client, "family:rt:reactions-del", "message_reactions");
+
+    const msgId = await insertMessage({ conversationId: convA, senderMemberId: memberA, body: "react and remove" });
+    const reactionId = randomUUID();
+    await pg.query(
+      `insert into message_reactions (id, "messageId", "memberId", emoji) values ($1, $2, $3, '✅')`,
+      [reactionId, msgId, memberA],
+    );
+    await delay(750);
+    await pg.query(`delete from message_reactions where id = $1`, [reactionId]);
+
+    const deadline = Date.now() + 20_000;
+    let seen = false;
+    while (!seen && Date.now() < deadline) {
+      seen = (events as { eventType?: string; old?: { id?: string; messageId?: string } }[]).some(
+        (e) => e.eventType === "DELETE" && e.old?.id === reactionId && !("messageId" in (e.old ?? {})),
+      );
+      if (!seen) await delay(1_000);
+    }
+    await channel.unsubscribe();
+    expect(seen).toBe(true);
+  });
+
+  it("pinned messages are listed newest-first for a conversation member", async () => {
+    const a = await signIn(`pl-${randomUUID()}@famora.test`);
+    const memberA = await addMember({ userId: a.userId, familyId: familyA, conversationId: convA, internalRole: "MEMBER" });
+    const m1 = await insertMessage({ conversationId: convA, senderMemberId: memberA, body: "pin first" });
+    const m2 = await insertMessage({ conversationId: convA, senderMemberId: memberA, body: "pin second" });
+    const m3 = await insertMessage({ conversationId: convA, senderMemberId: memberA, body: "do not pin" });
+    await pg.query(
+      `insert into pinned_messages (id, "messageId", "memberId", "createdAt") values (gen_random_uuid(), $1, $2, now() - interval '2 seconds')`,
+      [m1, memberA],
+    );
+    await pg.query(
+      `insert into pinned_messages (id, "messageId", "memberId", "createdAt") values (gen_random_uuid(), $1, $2, now())`,
+      [m2, memberA],
+    );
+
+    const pinnedMessages = await listPinnedMessages(convA, memberA);
+    const ids = pinnedMessages.map((m) => m.id);
+    expect(ids).toContain(m1);
+    expect(ids).toContain(m2);
+    expect(ids).not.toContain(m3);
+    expect(pinnedMessages.every((m) => m.isPinned)).toBe(true);
+    expect(ids.indexOf(m2)).toBeLessThan(ids.indexOf(m1));
   });
 });

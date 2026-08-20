@@ -120,78 +120,35 @@ export async function getMemberProfile(memberId: string): Promise<ChatMemberProf
   };
 }
 
-/** Lists the most recent messages in a conversation, oldest first. */
-export async function listFamilyMessages(
-  conversationId: string,
-  viewerMemberId: string,
-): Promise<ChatMessage[]> {
-  const rows = await prisma.message.findMany({
-    where: { conversationId },
-    orderBy: { createdAt: "desc" },
-    take: MESSAGE_PAGE_SIZE,
-    include: {
-      ...senderInclude(),
-      reactions: true,
-      pinnedMessage: true,
-      savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },
-    },
-  });
+type SenderFlat = {
+  id: string;
+  displayRole: string;
+  user: { displayName: string; avatarUrl: string | null };
+};
 
-  return rows
-    .reverse()
-    .map((row) => {
-      const reactionMap = new Map<string, { count: number; reactedByMe: boolean }>();
-      for (const reaction of row.reactions) {
-        const entry = reactionMap.get(reaction.emoji) ?? { count: 0, reactedByMe: false };
-        entry.count += 1;
-        if (reaction.memberId === viewerMemberId) entry.reactedByMe = true;
-        reactionMap.set(reaction.emoji, entry);
-      }
+type ChatRow = {
+  id: string;
+  conversationId: string;
+  body: string;
+  type: string;
+  createdAt: Date;
+  editedAt: Date | null;
+  deletedAt: Date | null;
+  senderMemberId: string | null;
+  sender: SenderFlat | null;
+  replyTo: {
+    id: string;
+    body: string;
+    deletedAt: Date | null;
+    sender: SenderFlat | null;
+  } | null;
+  reactions: { emoji: string; memberId: string }[];
+  pinnedMessage: { id: string } | null;
+  savedMessages: { id: string }[];
+};
 
-      return {
-        id: row.id,
-        conversationId: row.conversationId,
-        body: row.deletedAt ? "" : row.body,
-        type: row.type,
-        createdAt: row.createdAt.toISOString(),
-        editedAt: row.editedAt ? row.editedAt.toISOString() : null,
-        deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
-        sender: toSender(row.sender),
-        replyTo: row.replyTo
-          ? {
-              id: row.replyTo.id,
-              body: row.replyTo.deletedAt ? "" : row.replyTo.body,
-              sender: toSender(row.replyTo.sender),
-            }
-          : null,
-        reactions: [...reactionMap.entries()].map(([emoji, v]) => ({
-          emoji,
-          count: v.count,
-          reactedByMe: v.reactedByMe,
-        })),
-        isPinned: Boolean(row.pinnedMessage),
-        isSavedByMe: row.savedMessages.length > 0,
-        isMine: row.senderMemberId === viewerMemberId,
-      } satisfies ChatMessage;
-    });
-}
-
-/** Fetches and projects a single message the same way listFamilyMessages does. */
-export async function getFamilyMessage(
-  messageId: string,
-  viewerMemberId: string,
-): Promise<ChatMessage | null> {
-  const row = await prisma.message.findUnique({
-    where: { id: messageId },
-    include: {
-      ...senderInclude(),
-      reactions: true,
-      pinnedMessage: true,
-      savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },
-    },
-  });
-  if (!row) return null;
-
+/** Projects a DB row into the UI-safe ChatMessage shape (never internalRole). */
+function toChatMessage(row: ChatRow, viewerMemberId: string): ChatMessage {
   const reactionMap = new Map<string, { count: number; reactedByMe: boolean }>();
   for (const reaction of row.reactions) {
     const entry = reactionMap.get(reaction.emoji) ?? { count: 0, reactedByMe: false };
@@ -225,6 +182,64 @@ export async function getFamilyMessage(
     isSavedByMe: row.savedMessages.length > 0,
     isMine: row.senderMemberId === viewerMemberId,
   } satisfies ChatMessage;
+}
+
+/** Lists the most recent messages in a conversation, oldest first. */
+export async function listFamilyMessages(
+  conversationId: string,
+  viewerMemberId: string,
+): Promise<ChatMessage[]> {
+  const rows = await prisma.message.findMany({
+    where: { conversationId },
+    orderBy: { createdAt: "desc" },
+    take: MESSAGE_PAGE_SIZE,
+    include: {
+      ...senderInclude(),
+      reactions: true,
+      pinnedMessage: true,
+      savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },
+    },
+  });
+
+  return rows.reverse().map((row) => toChatMessage(row, viewerMemberId));
+}
+
+/** Lists pinned messages in a conversation, most recently pinned first. */
+export async function listPinnedMessages(
+  conversationId: string,
+  viewerMemberId: string,
+): Promise<ChatMessage[]> {
+  const rows = await prisma.message.findMany({
+    where: { conversationId, pinnedMessage: { isNot: null } },
+    orderBy: { pinnedMessage: { createdAt: "desc" } },
+    include: {
+      ...senderInclude(),
+      reactions: true,
+      pinnedMessage: true,
+      savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },
+    },
+  });
+
+  return rows.map((row) => toChatMessage(row, viewerMemberId));
+}
+
+/** Fetches and projects a single message the same way listFamilyMessages does. */
+export async function getFamilyMessage(
+  messageId: string,
+  viewerMemberId: string,
+): Promise<ChatMessage | null> {
+  const row = await prisma.message.findUnique({
+    where: { id: messageId },
+    include: {
+      ...senderInclude(),
+      reactions: true,
+      pinnedMessage: true,
+      savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },
+    },
+  });
+  if (!row) return null;
+
+  return toChatMessage(row, viewerMemberId);
 }
 
 /** displayRole helper re-export kept local so query callers don't reach into roles.ts unnecessarily. */

@@ -1,13 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { WifiOff, MessageSquare } from "lucide-react";
+import { WifiOff, MessageSquare, Pin, PinOff, ChevronRight } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { REALTIME_CHANNELS, REALTIME_POSTGRES_TABLES } from "@/lib/realtime/channels";
 import type { TypingPayload } from "@/lib/realtime/channels";
 import { EmptyState } from "@/components/core/empty-state";
 import { MessageItem } from "@/components/chat/message-item";
 import { MessageComposer } from "@/components/chat/message-composer";
+import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/server/queries/chat";
 import {
   sendFamilyMessage,
@@ -17,8 +18,8 @@ import {
   togglePinMessage,
   toggleSaveMessage,
   fetchFamilyMessage,
-  fetchMessageBySideEffect,
   fetchRecentMessages,
+  fetchPinnedMessages,
 } from "@/server/actions/chat";
 import { toast } from "sonner";
 
@@ -50,6 +51,8 @@ export function ChatRoom({
   const [replyingTo, setReplyingTo] = React.useState<ChatMessage | null>(null);
   const [connected, setConnected] = React.useState(true);
   const [typers, setTypers] = React.useState<Record<string, string>>({});
+  const [pinned, setPinned] = React.useState<ChatMessage[]>([]);
+  const [pinnedOpen, setPinnedOpen] = React.useState(false);
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const isNearBottomRef = React.useRef(true);
   const messagesRef = React.useRef<ChatMessage[]>(initialMessages);
@@ -63,6 +66,16 @@ export function ChatRoom({
   React.useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  React.useEffect(() => {
+    let active = true;
+    void fetchPinnedMessages(conversationId).then((pinned) => {
+      if (active) setPinned(pinned);
+    });
+    return () => {
+      active = false;
+    };
+  }, [conversationId]);
 
   function upsertMessage(next: ChatMessage) {
     setMessages((prev) => {
@@ -175,24 +188,32 @@ export function ChatRoom({
       });
     }
 
-    // Reactions/pins: INSERT events carry the message id directly; DELETE
-    // events only carry the child row's primary key, so resolve it server-side.
-    function refreshFromSideEffect(
-      payload: { new?: { id?: string; messageId?: string }; old?: { id?: string } },
-      kind: "reaction" | "pin",
-    ) {
+    function refreshPinned() {
       if (!active) return;
-      if (payload.new?.messageId) {
-        refetchIfVisible(payload.new.messageId);
+      void fetchPinnedMessages(conversationId).then((pinned) => {
+        if (active) setPinned(pinned);
+      });
+    }
+
+    // Reactions/pins: INSERT events carry the message id directly; DELETE
+    // events carry only the child row's id, so a single-message refetch is
+    // impossible (Realtime caps DELETE payloads to the primary key regardless
+    // of replica identity). Reconcile the whole conversation.
+    function refreshFromSideEffect(payload: {
+      new?: { id?: string; messageId?: string };
+      old?: { id?: string; messageId?: string };
+    }) {
+      if (!active) return;
+      const viaMessageId = payload.new?.messageId ?? payload.old?.messageId;
+      if (viaMessageId) {
+        refetchIfVisible(viaMessageId);
+        refreshPinned();
         return;
       }
-      const rowId = payload.old?.id ?? payload.new?.id;
-      if (!rowId) return;
-      void fetchMessageBySideEffect(kind, rowId).then((msg) => {
-        if (msg && active && messagesRef.current.some((m) => m.id === msg.id)) {
-          upsertMessage(msg);
-        }
+      void fetchRecentMessages(conversationId).then((fresh) => {
+        if (fresh && active) setMessages(fresh);
       });
+      refreshPinned();
     }
 
     try {
@@ -231,8 +252,8 @@ export function ChatRoom({
             schema: "public",
             table: REALTIME_POSTGRES_TABLES.messageReactions,
           },
-          (payload: { new?: { id?: string; messageId?: string }; old?: { id?: string } }) => {
-            refreshFromSideEffect(payload, "reaction");
+          (payload: { new?: { id?: string; messageId?: string }; old?: { id?: string; messageId?: string } }) => {
+            refreshFromSideEffect(payload);
           },
         )
         .on(
@@ -242,8 +263,8 @@ export function ChatRoom({
             schema: "public",
             table: REALTIME_POSTGRES_TABLES.pinnedMessages,
           },
-          (payload: { new?: { id?: string; messageId?: string }; old?: { id?: string } }) => {
-            refreshFromSideEffect(payload, "pin");
+          (payload: { new?: { id?: string; messageId?: string }; old?: { id?: string; messageId?: string } }) => {
+            refreshFromSideEffect(payload);
           },
         )
         .subscribe((status: string) => {
@@ -256,6 +277,7 @@ export function ChatRoom({
             void fetchRecentMessages(conversationId).then((fresh) => {
               if (fresh && active) setMessages(fresh);
             });
+            refreshPinned();
           }
         });
     } catch {
@@ -339,6 +361,8 @@ export function ChatRoom({
     }
     const fresh = await fetchFamilyMessage(messageId);
     if (fresh) upsertMessage(fresh);
+    const pinned = await fetchPinnedMessages(conversationId);
+    setPinned(pinned);
   }
 
   async function handleToggleSave(messageId: string) {
@@ -367,6 +391,59 @@ export function ChatRoom({
         <div className="flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground">
           <WifiOff className="h-3.5 w-3.5" aria-hidden />
           Reconnecting…
+        </div>
+      ) : null}
+
+      {pinned.length > 0 ? (
+        <div className="border-b border-border">
+          <button
+            type="button"
+            onClick={() => setPinnedOpen((open) => !open)}
+            className="flex w-full items-center justify-between px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            aria-expanded={pinnedOpen}
+          >
+            <span className="flex items-center gap-1.5">
+              <Pin className="h-3.5 w-3.5" aria-hidden />
+              Pinned ({pinned.length})
+            </span>
+            <ChevronRight
+              className={cn("h-3.5 w-3.5 transition-transform", pinnedOpen && "rotate-90")}
+              aria-hidden
+            />
+          </button>
+          {pinnedOpen ? (
+            <div className="max-h-48 space-y-0.5 overflow-y-auto border-t border-border px-3 py-2">
+              {pinned.map((message) => (
+                <div
+                  key={message.id}
+                  className="flex items-center gap-2 rounded-md bg-muted/60 px-2 py-1 text-xs"
+                >
+                  <span className="shrink-0 font-medium">
+                    {message.sender?.displayName ?? "Removed member"}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {message.body || (message.deletedAt ? "This message was deleted." : "")}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {new Date(message.createdAt).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </span>
+                  {permissions.canPin ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleTogglePin(message.id)}
+                      className="shrink-0 rounded p-0.5 hover:bg-accent"
+                      aria-label="Unpin message"
+                    >
+                      <PinOff className="h-3.5 w-3.5" aria-hidden />
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
