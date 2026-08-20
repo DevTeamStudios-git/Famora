@@ -43,6 +43,8 @@ import {
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/server/queries/chat";
 import { toast } from "sonner";
+import { AttachmentList } from "@/components/chat/attachment-list";
+import { VoiceMessagePlayer } from "@/components/chat/voice-message-player";
 
 type MessageItemProps = {
   message: ChatMessage;
@@ -180,14 +182,29 @@ export function MessageItem({
             </div>
           </div>
         ) : (
-          <p
-            className={cn(
-              "mt-0.5 whitespace-pre-wrap break-words text-sm",
-              isDeleted && "italic text-muted-foreground",
-            )}
-          >
-            {isDeleted ? "This message was deleted." : message.body}
-          </p>
+          <>
+            {message.body || (!message.attachments.length && message.type !== "VOICE") ? (
+              <p
+                className={cn(
+                  "mt-0.5 whitespace-pre-wrap break-words text-sm",
+                  isDeleted && "italic text-muted-foreground",
+                )}
+              >
+                {isDeleted ? "This message was deleted." : message.body}
+              </p>
+            ) : null}
+
+            {!isDeleted && message.type === "VOICE" ? (
+              <VoiceMessagePlayer
+                url={message.attachments[0]?.url ?? null}
+                durationMs={message.voiceDurationMs}
+              />
+            ) : null}
+
+            {!isDeleted && message.type !== "VOICE" ? (
+              <AttachmentList attachments={message.attachments} />
+            ) : null}
+          </>
         )}
 
         {message.reactions.length > 0 ? (

@@ -289,6 +289,7 @@ model Family {
   albums          Album[]
   memories        Memory[]
   notifications   Notification[]
+  chatUploadStaging ChatUploadStaging[]
 
   @@map("families")
 }
@@ -360,6 +361,7 @@ model FamilyMember {
   recipeComments          RecipeComment[]
   memoryComments          MemoryComment[]
   memoryReactions         MemoryReaction[]
+  chatUploadStaging       ChatUploadStaging[]
 
   @@unique([familyId, userId])
   @@index([userId])
@@ -535,6 +537,28 @@ model MessageAttachment {
 
   @@index([messageId])
   @@map("message_attachments")
+}
+
+// Transient record binding a direct-to-Storage chat upload to the member/family
+// that staged it. Rows are created by createUploadStaging() before the client
+// uploads the object, verified by finalizeChatMessage() for ownership, and
+// deleted once the send succeeds — or reclaimed by the storage cleanup policy
+// when an upload is abandoned. The row makes the object path a capability for
+// the staging member only; authorization never relies on guessing a UUID.
+model ChatUploadStaging {
+  id          String   @id @default(uuid()) @db.Uuid
+  familyId    String   @db.Uuid
+  memberId    String   @db.Uuid
+  storagePath String   @unique
+  status      String   @default("STAGED")
+  createdAt   DateTime @default(now())
+
+  family Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId])
+  @@index([createdAt])
+  @@map("chat_upload_staging")
 }
 
 model MessageReaction {

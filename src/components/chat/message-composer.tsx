@@ -1,19 +1,35 @@
 "use client";
 
 import * as React from "react";
-import { Send, X, CornerUpLeft, Smile, Mic, Square } from "lucide-react";
+import { Send, X, CornerUpLeft, Paperclip, Smile, Mic, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { EmojiPicker } from "@/components/chat/emoji-picker";
+import { AttachmentTray } from "@/components/chat/attachment-tray";
+import { VoiceRecorderButton } from "@/components/chat/voice-recorder";
+import {
+  useAttachmentUpload,
+  getUploadAccessToken,
+  uploadWithProgress,
+} from "@/components/chat/use-attachment-upload";
+import { createUploadStaging } from "@/server/actions/attachments";
+import { extensionForVoiceMime } from "@/lib/validation/attachments";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/server/queries/chat";
+import { toast } from "sonner";
+
+export type ComposerSendPayload = {
+  body: string;
+  attachments: { path: string; fileName: string; caption?: string }[];
+  voice: { path: string; fileName: string; durationMs: number } | null;
+};
 
 type MessageComposerProps = {
   disabled?: boolean;
   disabledReason?: string;
   replyingTo: ChatMessage | null;
   onCancelReply: () => void;
-  onSend: (body: string) => Promise<void> | void;
+  onSend: (payload: ComposerSendPayload) => Promise<void> | void;
   onTypingChange?: (isTyping: boolean) => void;
 };
 
@@ -54,10 +70,15 @@ export function MessageComposer({
   const [sending, setSending] = React.useState(false);
   const [dictating, setDictating] = React.useState(false);
   const [dictationSupported, setDictationSupported] = React.useState(false);
+  const [dragActive, setDragActive] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const recognitionRef = React.useRef<SpeechRecognitionLike | null>(null);
   const transcriptRef = React.useRef("");
   const baseRef = React.useRef("");
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const dragCounter = React.useRef(0);
+
+  const upload = useAttachmentUpload();
 
   const isTyping = value.trim().length > 0 && !sending && !disabled;
 
@@ -83,15 +104,65 @@ export function MessageComposer({
 
   async function handleSend() {
     const trimmed = value.trim();
-    if (!trimmed || sending || disabled) return;
+    if (sending || disabled) return;
+    if (upload.isUploading) {
+      toast.error("Wait for attachments to finish uploading.");
+      return;
+    }
+    if (!trimmed && upload.readyToSend.length === 0) return;
     stopDictation();
     setSending(true);
     try {
-      await onSend(trimmed);
+      await onSend({
+        body: trimmed,
+        attachments: upload.readyToSend.map((a) => ({
+          path: a.path,
+          fileName: a.file.name,
+          caption: a.caption || undefined,
+        })),
+        voice: null,
+      });
       setValue("");
+      upload.reset();
     } finally {
       setSending(false);
       textareaRef.current?.focus();
+    }
+  }
+
+  async function handleSendVoice(blob: Blob, durationMs: number) {
+    const accessToken = await getUploadAccessToken();
+    if (!accessToken) {
+      toast.error("You need to be signed in to send a voice message.");
+      return;
+    }
+    const staged = await createUploadStaging(`voice-message.${extensionForVoiceMime(blob.type)}`);
+    if (!staged.ok) {
+      toast.error(staged.error ?? "Couldn't start the upload.");
+      return;
+    }
+
+    try {
+      await uploadWithProgress({
+        path: staged.data.path,
+        file: blob,
+        accessToken,
+        onProgress: () => {},
+      }).promise;
+    } catch {
+      toast.error("Couldn't upload the voice message. Please try again.");
+      return;
+    }
+
+    setSending(true);
+    try {
+      await onSend({
+        body: "",
+        attachments: [],
+        voice: { path: staged.data.path, fileName: staged.data.fileName, durationMs },
+      });
+    } finally {
+      setSending(false);
     }
   }
 
@@ -161,10 +232,46 @@ export function MessageComposer({
     setDictating(false);
   }
 
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.clipboardData.files);
+    if (files.length > 0) {
+      e.preventDefault();
+      void upload.addFiles(files);
+    }
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDragActive(false);
+    if (e.dataTransfer.files.length > 0) void upload.addFiles(e.dataTransfer.files);
+  }
+
   const actionsDisabled = Boolean(disabled || sending);
+  const showSend = Boolean(value.trim() || upload.readyToSend.length > 0);
 
   return (
-    <div className="border-t border-border bg-card p-3">
+    <div
+      className={cn("relative border-t border-border bg-card p-3", dragActive && "bg-accent/30")}
+      onDragEnter={(e) => {
+        e.preventDefault();
+        dragCounter.current += 1;
+        setDragActive(true);
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault();
+        dragCounter.current -= 1;
+        if (dragCounter.current <= 0) setDragActive(false);
+      }}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={handleDrop}
+    >
+      {dragActive ? (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-primary bg-background/80 text-sm font-medium text-primary">
+          Drop to attach
+        </div>
+      ) : null}
+
       {replyingTo ? (
         <div className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-muted px-3 py-2 text-xs">
           <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
@@ -195,12 +302,40 @@ export function MessageComposer({
         </p>
       ) : null}
 
+      <AttachmentTray
+        attachments={upload.attachments}
+        onRemove={upload.removeAttachment}
+        onCaptionChange={upload.updateCaption}
+      />
+
       <div className="flex items-end gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) void upload.addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={actionsDisabled}
+          onClick={() => fileInputRef.current?.click()}
+          aria-label="Attach a file"
+          title="Attach a file"
+        >
+          <Paperclip className="h-4 w-4" aria-hidden />
+        </Button>
         <Textarea
           ref={textareaRef}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           onBlur={() => onTypingChange?.(false)}
           placeholder="Message the family…"
           disabled={disabled || sending}
@@ -210,21 +345,6 @@ export function MessageComposer({
           )}
         />
         <div className="flex shrink-0 items-end gap-0.5">
-          <EmojiPicker
-            align="end"
-            trigger={
-              <Button
-                type="button"
-                variant="ghost"
-                size="iconSm"
-                disabled={actionsDisabled}
-                aria-label="Insert emoji"
-              >
-                <Smile className="h-4 w-4" aria-hidden />
-              </Button>
-            }
-            onSelect={insertEmoji}
-          />
           {dictationSupported ? (
             <Button
               type="button"
@@ -241,16 +361,35 @@ export function MessageComposer({
               )}
             </Button>
           ) : null}
-          <Button
-            type="button"
-            size="icon"
-            disabled={actionsDisabled || !value.trim()}
-            loading={sending}
-            onClick={() => void handleSend()}
-            aria-label="Send message"
-          >
-            <Send className="h-4 w-4" aria-hidden />
-          </Button>
+          <EmojiPicker
+            align="end"
+            trigger={
+              <Button
+                type="button"
+                variant="ghost"
+                size="iconSm"
+                disabled={actionsDisabled}
+                aria-label="Insert emoji"
+              >
+                <Smile className="h-4 w-4" aria-hidden />
+              </Button>
+            }
+            onSelect={insertEmoji}
+          />
+          {showSend ? (
+            <Button
+              type="button"
+              size="icon"
+              disabled={actionsDisabled || upload.isUploading}
+              loading={sending}
+              onClick={() => void handleSend()}
+              aria-label="Send message"
+            >
+              <Send className="h-4 w-4" aria-hidden />
+            </Button>
+          ) : (
+            <VoiceRecorderButton disabled={actionsDisabled} onSend={handleSendVoice} />
+          )}
         </div>
       </div>
       <p className="mt-1 px-1 text-[11px] text-muted-foreground">

@@ -502,4 +502,63 @@ describe.skipIf(!hasEnv)("Realtime authorization", () => {
     expect(pinnedMessages.every((m) => m.isPinned)).toBe(true);
     expect(ids.indexOf(m2)).toBeLessThan(ids.indexOf(m1));
   });
+
+  it("chat_upload_staging RLS keeps staged uploads strictly personal", async () => {
+    const a = await signIn(`stage-a-${randomUUID()}@famora.test`);
+    const b = await signIn(`stage-b-${randomUUID()}@famora.test`);
+    const memberA = await addMember({ userId: a.userId, familyId: familyA, conversationId: convA, internalRole: "MEMBER" });
+    const memberB = await addMember({ userId: b.userId, familyId: familyB, conversationId: convB, internalRole: "MEMBER" });
+
+    // Own row: insert + select + delete all succeed for the staging member.
+    const path = `${familyA}/chat/${randomUUID()}/me.png`;
+    const ins = await a.client.from("chat_upload_staging").insert({
+      id: randomUUID(),
+      familyId: familyA,
+      memberId: memberA,
+      storagePath: path,
+      status: "STAGED",
+    });
+    expect(ins.error).toBeNull();
+
+    const sel = await a.client
+      .from("chat_upload_staging")
+      .select("storagePath")
+      .eq("storagePath", path);
+    expect(sel.error).toBeNull();
+    expect(sel.data).toHaveLength(1);
+
+    // B cannot SELECT A's row — the fail-open selector leak from 0004's
+    // default grants is closed by the RLS policy.
+    const crossSel = await b.client
+      .from("chat_upload_staging")
+      .select("storagePath")
+      .eq("storagePath", path);
+    expect(crossSel.error).toBeNull();
+    expect(crossSel.data ?? []).toHaveLength(0);
+
+    // B cannot forge a row claiming A's memberId.
+    const forge = await b.client.from("chat_upload_staging").insert({
+      id: randomUUID(),
+      familyId: familyA,
+      memberId: memberA,
+      storagePath: `${familyA}/chat/${randomUUID()}/nope.png`,
+    });
+    expect(forge.error).not.toBeNull();
+
+    // B cannot stage a row in a family they don't belong to.
+    const foreign = await b.client.from("chat_upload_staging").insert({
+      id: randomUUID(),
+      familyId: familyA,
+      memberId: memberB,
+      storagePath: `${familyA}/chat/${randomUUID()}/foreign.png`,
+    });
+    expect(foreign.error).not.toBeNull();
+
+    // A can delete its own unfinalized staging row.
+    const del = await a.client
+      .from("chat_upload_staging")
+      .delete()
+      .eq("storagePath", path);
+    expect(del.error).toBeNull();
+  });
 });

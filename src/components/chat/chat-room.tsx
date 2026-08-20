@@ -11,7 +11,6 @@ import { MessageComposer } from "@/components/chat/message-composer";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/server/queries/chat";
 import {
-  sendFamilyMessage,
   editFamilyMessage,
   deleteFamilyMessage,
   toggleMessageReaction,
@@ -21,6 +20,8 @@ import {
   fetchRecentMessages,
   fetchPinnedMessages,
 } from "@/server/actions/chat";
+import { finalizeChatMessage } from "@/server/actions/attachments";
+import type { ComposerSendPayload } from "@/components/chat/message-composer";
 import { toast } from "sonner";
 
 type ChatRoomProps = {
@@ -310,10 +311,12 @@ export function ChatRoom({
       el.scrollHeight - el.scrollTop - el.clientHeight < 120;
   }
 
-  async function handleSend(body: string) {
-    const result = await sendFamilyMessage({
-      body,
+  async function handleSend(payload: ComposerSendPayload) {
+    const result = await finalizeChatMessage({
+      body: payload.body,
       replyToId: replyingTo?.id ?? null,
+      attachments: payload.attachments,
+      voice: payload.voice,
     });
     if (!result.ok) {
       toast.error(result.error);
@@ -483,7 +486,7 @@ export function ChatRoom({
         </div>
       ) : null}
 
-      <MessageComposer
+<MessageComposer
         disabled={!permissions.canSend}
         disabledReason="You don't have permission to send messages in Family Chat."
         replyingTo={replyingTo}

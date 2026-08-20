@@ -5,13 +5,19 @@
 // knows will be rejected. Writes go through Prisma; Supabase Realtime picks
 // them up from the Postgres WAL (`postgres_changes`), so no separate
 // broadcast call is needed here.
+//
+// Sending a message (text and/or attachments/voice) lives in
+// server/actions/attachments.ts (finalizeChatMessage) — that's the single
+// send path now, since attachments need the same permission check, reply
+// validation, and message-row creation this file used to do on its own.
+// Keeping two separate "create a message" code paths would risk their
+// permission logic drifting apart.
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma/client";
 import { getAccessState } from "@/lib/auth/session";
 import { hasPermission } from "@/lib/authorization/authorization";
-import { messageSchema } from "@/lib/validation/schemas";
-import { getOrCreateFamilyChatConversation, getFamilyMessage, listFamilyMessages, listPinnedMessages, type ChatMessage } from "@/server/queries/chat";
+import { getFamilyMessage, listFamilyMessages, listPinnedMessages, type ChatMessage } from "@/server/queries/chat";
 import { z } from "zod";
 
 type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
@@ -22,50 +28,6 @@ async function requireAuthorized() {
     throw new Error("Not authorized.");
   }
   return access;
-}
-
-export async function sendFamilyMessage(input: {
-  body: string;
-  replyToId?: string | null;
-}): Promise<ActionResult<ChatMessage>> {
-  const access = await requireAuthorized();
-  if (!hasPermission(access.membership, "chat.send")) {
-    return { ok: false, error: "You don't have permission to send messages." };
-  }
-
-  const parsed = messageSchema.safeParse(input);
-  if (!parsed.success || !parsed.data.body.trim()) {
-    return { ok: false, error: "Message can't be empty." };
-  }
-
-  const conversationId = await getOrCreateFamilyChatConversation(
-    access.familyId,
-    access.memberId,
-  );
-
-  // A reply must point at a message in the same conversation.
-  let replyToId: string | null = null;
-  if (parsed.data.replyToId) {
-    const target = await prisma.message.findFirst({
-      where: { id: parsed.data.replyToId, conversationId },
-      select: { id: true },
-    });
-    replyToId = target?.id ?? null;
-  }
-
-  const created = await prisma.message.create({
-    data: {
-      conversationId,
-      senderMemberId: access.memberId,
-      body: parsed.data.body.trim(),
-      replyToId,
-    },
-    select: { id: true },
-  });
-
-  revalidatePath("/chat");
-  const message = await getFamilyMessage(created.id, access.memberId);
-  return message ? { ok: true, data: message } : { ok: false, error: "Message sent." };
 }
 
 export async function editFamilyMessage(
@@ -255,7 +217,7 @@ export async function fetchRecentMessages(
     where: { id: conversationId },
     select: { familyId: true },
   });
-if (!conversation || conversation.familyId !== access.familyId) {
+  if (!conversation || conversation.familyId !== access.familyId) {
     return [];
   }
   return listFamilyMessages(conversationId, access.memberId);
