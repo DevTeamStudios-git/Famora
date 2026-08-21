@@ -1,0 +1,24 @@
+## Error Type
+Runtime TypeError
+
+## Error Message
+Cannot read properties of undefined (reading 'length')
+
+
+    at AttachmentList (src/components/chat/attachment-list.tsx:13:19)
+    at MessageItem (src/components/chat/message-item.tsx:205:15)
+    at <unknown> (src/components/chat/chat-room.tsx:463:15)
+    at Array.map (<anonymous>:null:null)
+    at ChatRoom (src/components/chat/chat-room.tsx:462:23)
+    at ChatPage (src\app\(family)\chat\page.tsx:51:7)
+
+## Code Frame
+  11 |
+  12 | export function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
+> 13 |   if (attachments.length === 0) return null;
+     |                   ^
+  14 |
+  15 |   const media = attachments.filter((a) => a.category === "IMAGE" || a.category === "VIDEO");
+  16 |   const files = attachments.filter((a) => a.category !== "IMAGE" && a.category !== "VIDEO");
+
+Next.js version: 16.3.1 (Turbopack)

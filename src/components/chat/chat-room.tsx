@@ -320,7 +320,7 @@ export function ChatRoom({
     });
     if (!result.ok) {
       toast.error(result.error);
-      return;
+      throw new Error(result.error);
     }
     upsertMessage(result.data);
     setReplyingTo(null);

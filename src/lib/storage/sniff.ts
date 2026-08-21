@@ -73,7 +73,13 @@ export async function sniffUploadedMimeType(
 
   const buffer = new Uint8Array(await response.arrayBuffer()).slice(0, SNIFF_BYTES);
   const result = await fileTypeFromBuffer(buffer);
-  return result?.mime ?? null;
+  if (result?.mime) return result.mime;
+
+  // file-type doesn't detect text files (no magic bytes). Fall back to
+  // extension-based detection for known text types we allow.
+  const ext = path.split(".").pop()?.toLowerCase();
+  if (ext === "txt") return "text/plain";
+  return null;
 }
 
 /** Best-effort delete — used for cleanup after failed/rejected uploads. */

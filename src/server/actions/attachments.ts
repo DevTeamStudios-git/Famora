@@ -77,6 +77,7 @@ async function requireAuthorized() {
  */
 export async function createUploadStaging(
   fileName: string,
+  purpose: "ATTACHMENT" | "VOICE" = "ATTACHMENT",
 ): Promise<ActionResult<{ path: string }>> {
   const access = await requireAuthorized();
   if (!hasPermission(access.membership, "chat.send")) {
@@ -93,6 +94,7 @@ export async function createUploadStaging(
       memberId: access.memberId,
       storagePath: path,
       fileName: safeName,
+      purpose,
     },
   });
 
@@ -116,25 +118,34 @@ export async function cancelUploadStaging(path: string): Promise<ActionResult> {
  * finalizeChatMessage() and have it attached to a message they didn't
  * upload. A random UUID path is hard to guess, but authorization must not
  * rest on secrecy of a path — see createUploadStaging() above.
+ * 
+ * Also enforces purpose binding: voice paths must have been staged as VOICE,
+ * attachment paths must have been staged as ATTACHMENT.
  */
 async function assertOwnedStagedPaths(
   paths: string[],
   access: { familyId: string; memberId: string },
+  expectedPurpose: Map<string, "ATTACHMENT" | "VOICE">,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (paths.length === 0) return { ok: true };
-  const rows: { storagePath: string; familyId: string; memberId: string }[] =
+  const rows: { storagePath: string; familyId: string; memberId: string; purpose: "ATTACHMENT" | "VOICE" }[] =
     await prisma.chatUploadStaging.findMany({
       where: { storagePath: { in: paths } },
-      select: { storagePath: true, familyId: true, memberId: true },
+      select: { storagePath: true, familyId: true, memberId: true, purpose: true },
     });
-  const byPath = new Map<string, { storagePath: string; familyId: string; memberId: string }>(
-    rows.map((r) => [r.storagePath, r]),
-  );
+  const byPath = new Map<
+    string,
+    { storagePath: string; familyId: string; memberId: string; purpose: "ATTACHMENT" | "VOICE" }
+  >(rows.map((r) => [r.storagePath, r]));
 
   for (const path of paths) {
     const staged = byPath.get(path);
+    const expected = expectedPurpose.get(path);
     if (!staged || staged.memberId !== access.memberId || staged.familyId !== access.familyId) {
       return { ok: false, error: "One of those attachments couldn't be verified. Please re-upload." };
+    }
+    if (expected && staged.purpose !== expected) {
+      return { ok: false, error: "Invalid upload type. Please re-upload." };
     }
   }
   return { ok: true };
@@ -191,9 +202,12 @@ export async function finalizeChatMessage(
     ...(input.voice ? [input.voice.path] : []),
   ];
 
-  const ownership = await assertOwnedStagedPaths(allPaths, access);
+  const expectedPurpose = new Map<string, "ATTACHMENT" | "VOICE">();
+  for (const item of input.attachments) expectedPurpose.set(item.path, "ATTACHMENT");
+  if (input.voice) expectedPurpose.set(input.voice.path, "VOICE");
+
+  const ownership = await assertOwnedStagedPaths(allPaths, access, expectedPurpose);
   if (!ownership.ok) {
-    await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
     return { ok: false, error: ownership.error };
   }
 

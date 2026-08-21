@@ -124,6 +124,8 @@ export function MessageComposer({
       });
       setValue("");
       upload.reset();
+    } catch {
+      // onSend throws on failure — keep attachments/voice for retry
     } finally {
       setSending(false);
       textareaRef.current?.focus();
@@ -137,7 +139,7 @@ export function MessageComposer({
       return;
     }
     const fileName = `voice-message.${extensionForVoiceMime(blob.type)}`;
-    const staging = await createUploadStaging(fileName);
+    const staging = await createUploadStaging(fileName, "VOICE");
     if (!staging.ok) {
       toast.error(staging.error);
       return;
@@ -159,6 +161,8 @@ export function MessageComposer({
         attachments: [],
         voice: { path, fileName, durationMs },
       });
+    } catch {
+      // onSend throws on failure — keep voice recording for retry
     } finally {
       setSending(false);
     }
