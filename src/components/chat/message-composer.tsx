@@ -85,10 +85,11 @@ export function MessageComposer({
   const [dictationSupported, setDictationSupported] = React.useState(false);
   const [dictationError, setDictationError] = React.useState<string | null>(null);
   const [showDictationPrivacy, setShowDictationPrivacy] = React.useState(false);
-  const [dictationLang, setDictationLang] = React.useState(navigator?.language ?? "en-US");
+  const [dictationLang, setDictationLang] = React.useState<string>("en-US");
   const [recognitionRestarts, setRecognitionRestarts] = React.useState(0);
   const [userStoppedDictation, setUserStoppedDictation] = React.useState(false);
   const [dragActive, setDragActive] = React.useState(false);
+  const [hasShownPrivacyNotice, setHasShownPrivacyNotice] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const recognitionRef = React.useRef<SpeechRecognitionLike | null>(null);
   const transcriptRef = React.useRef("");
@@ -103,6 +104,15 @@ export function MessageComposer({
   React.useEffect(() => {
     queueMicrotask(() => {
       setDictationSupported(getSpeechRecognition() !== null);
+    });
+  }, []);
+
+  // Initialize dictation language on client side (SSR-safe)
+  React.useEffect(() => {
+    queueMicrotask(() => {
+      if (typeof navigator !== "undefined" && navigator.language) {
+        setDictationLang(navigator.language);
+      }
     });
   }, []);
 
@@ -213,7 +223,8 @@ export function MessageComposer({
     transcriptRef.current = "";
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = dictationLang;
+    // "auto" means use the browser's current locale
+    recognition.lang = dictationLang === "auto" ? (navigator?.language ?? "en-US") : dictationLang;
     recognition.onresult = (event) => {
       let interim = "";
       let finalDelta = "";
@@ -265,6 +276,11 @@ export function MessageComposer({
     setDictating(true);
     setDictationError(null);
     setUserStoppedDictation(false);
+    // First-use privacy notice
+    if (!hasShownPrivacyNotice) {
+      setShowDictationPrivacy(true);
+      setHasShownPrivacyNotice(true);
+    }
     try {
       recognition.start();
     } catch {
@@ -432,7 +448,6 @@ export function MessageComposer({
                     value={dictationLang}
                     onChange={(e) => {
                       setDictationLang(e.target.value);
-                      if (!showDictationPrivacy) setShowDictationPrivacy(true);
                     }}
                     className="h-7 px-2 py-1 text-xs bg-background border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
                     disabled={actionsDisabled || dictating}
