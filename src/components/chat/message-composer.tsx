@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Send, X, CornerUpLeft, Paperclip, Smile, Mic, Square } from "lucide-react";
+import { Send, X, CornerUpLeft, Paperclip, Smile, Mic, Square, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { EmojiPicker } from "@/components/chat/emoji-picker";
@@ -48,6 +48,19 @@ type SpeechRecognitionLike = {
   onerror: ((event: { error: string }) => void) | null;
 };
 
+const DICTATION_ERROR_MESSAGES: Record<string, string> = {
+  "not-allowed": "Microphone permission was denied. Please allow microphone access to use voice typing.",
+  "no-speech": "No speech was detected. Please try speaking closer to the microphone.",
+  "audio-capture": "Microphone unavailable. Please check your microphone is connected and not in use.",
+  "network": "Speech recognition service is unreachable. Please check your connection.",
+  "aborted": "Voice typing was cancelled.",
+  "service-not-allowed": "Speech recognition isn't available right now. Please try again later.",
+  "bad-grammar": "Speech recognition grammar error. Please try again.",
+  "language-not-supported": "The selected language isn't supported for voice typing.",
+};
+
+const MAX_RECOGNITION_RESTARTS = 1;
+
 function getSpeechRecognition(): SpeechRecognitionLike | null {
   if (typeof window === "undefined") return null;
   const w = window as unknown as {
@@ -70,6 +83,11 @@ export function MessageComposer({
   const [sending, setSending] = React.useState(false);
   const [dictating, setDictating] = React.useState(false);
   const [dictationSupported, setDictationSupported] = React.useState(false);
+  const [dictationError, setDictationError] = React.useState<string | null>(null);
+  const [showDictationPrivacy, setShowDictationPrivacy] = React.useState(false);
+  const [dictationLang, setDictationLang] = React.useState(navigator?.language ?? "en-US");
+  const [recognitionRestarts, setRecognitionRestarts] = React.useState(0);
+  const [userStoppedDictation, setUserStoppedDictation] = React.useState(false);
   const [dragActive, setDragActive] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const recognitionRef = React.useRef<SpeechRecognitionLike | null>(null);
@@ -195,9 +213,7 @@ export function MessageComposer({
     transcriptRef.current = "";
     recognition.continuous = true;
     recognition.interimResults = true;
-    if (typeof navigator !== "undefined" && navigator.language) {
-      recognition.lang = navigator.language;
-    }
+    recognition.lang = dictationLang;
     recognition.onresult = (event) => {
       let interim = "";
       let finalDelta = "";
@@ -213,14 +229,42 @@ export function MessageComposer({
       if (interim) next = next.trimEnd() + " " + interim.trimEnd();
       setValue(next);
     };
-    recognition.onerror = () => {
+    recognition.onerror = (event) => {
+      const errorMsg = DICTATION_ERROR_MESSAGES[event.error] ?? "Voice typing encountered an error. Please try again.";
+      setDictationError(errorMsg);
       recognition.abort();
+      setDictating(false);
+      setUserStoppedDictation(false);
+      setRecognitionRestarts(0);
     };
     recognition.onend = () => {
-      setDictating(false);
-      textareaRef.current?.focus();
+      if (userStoppedDictation) {
+        // User explicitly stopped — clean shutdown
+        setDictating(false);
+        setUserStoppedDictation(false);
+        setRecognitionRestarts(0);
+        textareaRef.current?.focus();
+        return;
+      }
+      // Browser ended recognition unexpectedly — restart once if under limit
+      if (recognitionRestarts < MAX_RECOGNITION_RESTARTS) {
+        setRecognitionRestarts((r) => r + 1);
+        try {
+          recognition.start();
+        } catch {
+          setDictating(false);
+          setRecognitionRestarts(0);
+          textareaRef.current?.focus();
+        }
+      } else {
+        setDictating(false);
+        setRecognitionRestarts(0);
+        textareaRef.current?.focus();
+      }
     };
     setDictating(true);
+    setDictationError(null);
+    setUserStoppedDictation(false);
     try {
       recognition.start();
     } catch {
@@ -230,8 +274,8 @@ export function MessageComposer({
   }
 
   function stopDictation() {
+    setUserStoppedDictation(true);
     recognitionRef.current?.stop();
-    setDictating(false);
   }
 
   function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
@@ -304,66 +348,127 @@ export function MessageComposer({
         </p>
       ) : null}
 
-      <AttachmentTray
-        attachments={upload.attachments}
-        onRemove={upload.removeAttachment}
-        onCaptionChange={upload.updateCaption}
-      />
-
-      <div className="flex items-end gap-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            if (e.target.files) void upload.addFiles(e.target.files);
-            e.target.value = "";
-          }}
-        />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          disabled={actionsDisabled}
-          onClick={() => fileInputRef.current?.click()}
-          aria-label="Attach a file"
-          title="Attach a file"
-        >
-          <Paperclip className="h-4 w-4" aria-hidden />
-        </Button>
-        <Textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onBlur={() => onTypingChange?.(false)}
-          placeholder="Message the family…"
-          disabled={disabled || sending}
-          rows={1}
-          className={cn(
-            "max-h-40 min-h-9 flex-1 resize-none py-2",
+{/* Dictation error banner */}
+          {dictationError && (
+            <div className="mb-2 flex items-center gap-2 rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-xs text-destructive">
+              <Mic className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>{dictationError}</span>
+              <button
+                type="button"
+                onClick={() => setDictationError(null)}
+                className="ml-auto shrink-0 rounded p-0.5 hover:bg-destructive/20 text-destructive/70"
+                aria-label="Dismiss error"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
           )}
-        />
-        <div className="flex shrink-0 items-end gap-0.5">
-          {dictationSupported ? (
+
+          {showDictationPrivacy && (
+            <div className="mb-2 flex items-start gap-2 rounded-lg bg-muted/50 border border-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <Globe className="h-3.5 w-3.5 shrink-0 mt-0.5" aria-hidden />
+              <span>
+                Voice typing uses your browser&apos;s speech recognition service. Audio processing
+                may be handled by your browser/provider.
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowDictationPrivacy(false)}
+                className="ml-auto shrink-0 rounded p-0.5 hover:bg-muted"
+                aria-label="Dismiss"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
+          <AttachmentTray
+            attachments={upload.attachments}
+            onRemove={upload.removeAttachment}
+            onCaptionChange={upload.updateCaption}
+          />
+
+          <div className="flex items-end gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                if (e.target.files) void upload.addFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
             <Button
               type="button"
-              variant={dictating ? "secondary" : "ghost"}
-              size="iconSm"
+              variant="ghost"
+              size="icon"
               disabled={actionsDisabled}
-              onClick={() => (dictating ? stopDictation() : startDictation())}
-              aria-label={dictating ? "Stop voice input" : "Start voice input"}
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach a file"
+              title="Attach a file"
             >
-              {dictating ? (
-                <Square className="h-4 w-4" aria-hidden />
-              ) : (
-                <Mic className="h-4 w-4" aria-hidden />
-              )}
+              <Paperclip className="h-4 w-4" aria-hidden />
             </Button>
-          ) : null}
-          <EmojiPicker
+            <Textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              onBlur={() => onTypingChange?.(false)}
+              placeholder="Message the family…"
+              disabled={disabled || sending || dictating}
+              rows={1}
+              className={cn(
+                "max-h-40 min-h-9 flex-1 resize-none py-2",
+                dictating && "bg-muted/50"
+              )}
+            />
+            <div className="flex shrink-0 items-end gap-0.5">
+              {dictationSupported ? (
+                <div className="flex items-center gap-1">
+                  <select
+                    value={dictationLang}
+                    onChange={(e) => {
+                      setDictationLang(e.target.value);
+                      if (!showDictationPrivacy) setShowDictationPrivacy(true);
+                    }}
+                    className="h-7 px-2 py-1 text-xs bg-background border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                    disabled={actionsDisabled || dictating}
+                    aria-label="Voice typing language"
+                  >
+                    <option value="auto">Automatic</option>
+                    <option value="en-US">English (US)</option>
+                    <option value="en-CA">English (Canada)</option>
+                    <option value="fr-CA">Français (Canada)</option>
+                    <option value="es-ES">Español (España)</option>
+                    <option value="es-MX">Español (México)</option>
+                    <option value="de-DE">Deutsch</option>
+                    <option value="it-IT">Italiano</option>
+                    <option value="pt-BR">Português (Brasil)</option>
+                    <option value="ja-JP">日本語</option>
+                    <option value="ko-KR">한국어</option>
+                    <option value="zh-CN">中文 (简体)</option>
+                    <option value="zh-TW">中文 (繁體)</option>
+                  </select>
+                  <Button
+                    type="button"
+                    variant={dictating ? "secondary" : "ghost"}
+                    size="iconSm"
+                    disabled={actionsDisabled}
+                    onClick={() => (dictating ? stopDictation() : startDictation())}
+                    aria-label={dictating ? "Stop voice input" : "Start voice input"}
+                  >
+                    {dictating ? (
+                      <Square className="h-4 w-4" aria-hidden />
+                    ) : (
+                      <Mic className="h-4 w-4" aria-hidden />
+                    )}
+                  </Button>
+                </div>
+              ) : null}
+              <EmojiPicker
             align="end"
             trigger={
               <Button
@@ -396,7 +501,7 @@ export function MessageComposer({
       </div>
       <p className="mt-1 px-1 text-[11px] text-muted-foreground">
         {dictating
-          ? "Listening… tap the stop button when you're done"
+          ? "Listening… editing is paused while dictating"
           : "Enter to send · Shift + Enter for a new line"}
       </p>
     </div>
