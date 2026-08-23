@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { EmojiPicker } from "@/components/chat/emoji-picker";
 import { AttachmentTray } from "@/components/chat/attachment-tray";
 import { VoiceRecorderButton } from "@/components/chat/voice-recorder";
+import { type VoiceRecorderState } from "@/components/chat/use-voice-recorder";
 import {
   useAttachmentUpload,
   getUploadAccessToken,
@@ -88,6 +89,7 @@ export function MessageComposer({
   const [dictationLang, setDictationLang] = React.useState<string>("en-US");
   const [recognitionRestarts, setRecognitionRestarts] = React.useState(0);
   const [userStoppedDictation, setUserStoppedDictation] = React.useState(false);
+  const [voiceRecorderState, setVoiceRecorderState] = React.useState<VoiceRecorderState>("idle");
   const [dragActive, setDragActive] = React.useState(false);
   const [hasShownPrivacyNotice, setHasShownPrivacyNotice] = React.useState(false);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -161,6 +163,7 @@ export function MessageComposer({
   }
 
   async function handleSendVoice(blob: Blob, durationMs: number) {
+    stopDictation();
     const accessToken = await getUploadAccessToken();
     if (!accessToken) {
       toast.error("You need to be signed in to send a voice message.");
@@ -471,7 +474,7 @@ export function MessageComposer({
                     type="button"
                     variant={dictating ? "secondary" : "ghost"}
                     size="iconSm"
-                    disabled={actionsDisabled}
+                    disabled={actionsDisabled || voiceRecorderState === "recording" || voiceRecorderState === "recorded"}
                     onClick={() => (dictating ? stopDictation() : startDictation())}
                     aria-label={dictating ? "Stop voice input" : "Start voice input"}
                   >
@@ -510,7 +513,11 @@ export function MessageComposer({
               <Send className="h-4 w-4" aria-hidden />
             </Button>
           ) : (
-            <VoiceRecorderButton disabled={actionsDisabled} onSend={handleSendVoice} />
+            <VoiceRecorderButton
+              disabled={actionsDisabled || dictating}
+              onSend={handleSendVoice}
+              onStateChange={setVoiceRecorderState}
+            />
           )}
         </div>
       </div>

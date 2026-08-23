@@ -3,7 +3,7 @@
 import * as React from "react";
 import { Mic, Trash2, Send, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useVoiceRecorder } from "@/components/chat/use-voice-recorder";
+import { useVoiceRecorder, type VoiceRecorderState } from "@/components/chat/use-voice-recorder";
 import { VOICE_MESSAGE_MAX_DURATION_SECONDS } from "@/lib/validation/attachments";
 
 function formatDuration(ms: number): string {
@@ -16,9 +16,11 @@ function formatDuration(ms: number): string {
 export function VoiceRecorderButton({
   disabled,
   onSend,
+  onStateChange,
 }: {
   disabled?: boolean;
   onSend: (blob: Blob, durationMs: number) => Promise<void> | void;
+  onStateChange?: (state: VoiceRecorderState) => void;
 }) {
   const recorder = useVoiceRecorder();
   const [sending, setSending] = React.useState(false);
@@ -33,6 +35,10 @@ export function VoiceRecorderButton({
     queueMicrotask(() => setPreviewUrl(url));
     return () => URL.revokeObjectURL(url);
   }, [recorder.result]);
+
+  React.useEffect(() => {
+    onStateChange?.(recorder.state);
+  }, [recorder.state, onStateChange]);
 
   if (recorder.state === "unsupported") return null;
 
