@@ -98,6 +98,47 @@ export function extensionForVoiceMime(mimeType: string): string {
   }
 }
 
+/**
+ * Whether a byte buffer looks like real, plausible plain text — the actual
+ * security check behind the ".txt" fallback in sniff.ts. file-type has no
+ * magic bytes for text (nothing to sniff), so a genuine .txt upload always
+ * needs *some* fallback path — but the fallback must not just trust the
+ * uploader's chosen file name, since that's fully client-controlled. This
+ * validates the real bytes instead: a NUL byte is treated as a certain
+ * binary signal (real text never contains one); otherwise the content must
+ * be valid UTF-8 and, outside common whitespace control characters
+ * (tab/LF/CR), essentially free of control bytes.
+ *
+ * The buffer passed in may be a prefix of a larger file (sniff.ts only reads
+ * the first SNIFF_BYTES) — the UTF-8 check tolerates a multi-byte character
+ * being split across that read boundary by retrying the decode with up to 3
+ * trailing bytes trimmed (the longest a single UTF-8 code point can be)
+ * before concluding it's genuinely invalid.
+ */
+export function looksLikePlainText(buffer: Uint8Array): boolean {
+  if (buffer.length === 0) return true;
+  if (buffer.includes(0)) return false; // NUL byte: essentially never appears in real text
+
+  let controlBytes = 0;
+  for (const byte of buffer) {
+    if (byte < 0x20 && byte !== 9 && byte !== 10 && byte !== 13) controlBytes++;
+  }
+  if (controlBytes / buffer.length > 0.01) return false;
+
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const maxTrim = Math.min(3, buffer.length - 1);
+  for (let trim = 0; trim <= maxTrim; trim++) {
+    try {
+      decoder.decode(buffer.subarray(0, buffer.length - trim));
+      return true;
+    } catch {
+      // Might have cut a multi-byte UTF-8 sequence at the read boundary —
+      // trim one more trailing byte and retry before giving up.
+    }
+  }
+  return false;
+}
+
 const SIZE_LIMITS: Record<AttachmentCategory, number> = {
   IMAGE: CHAT_IMAGE_MAX_SIZE,
   VIDEO: CHAT_VIDEO_MAX_SIZE,

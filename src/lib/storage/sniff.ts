@@ -2,6 +2,7 @@ import "server-only";
 
 import { fileTypeFromBuffer } from "file-type";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import { looksLikePlainText } from "@/lib/validation/attachments";
 
 // Bytes needed for file-type's magic-number detection across every format
 // we allow (video containers need the most — MP4/WebM headers can be a few
@@ -75,10 +76,16 @@ export async function sniffUploadedMimeType(
   const result = await fileTypeFromBuffer(buffer);
   if (result?.mime) return result.mime;
 
-  // file-type doesn't detect text files (no magic bytes). Fall back to
-  // extension-based detection for known text types we allow.
+  // file-type has no magic bytes for plain text — a real .txt upload always
+  // lands here. Extension alone is NOT the security check: path/fileName is
+  // client-controlled, so accepting on extension alone would let arbitrary
+  // unrecognized binary content in as long as it's named "*.txt". Only
+  // accept the extension-implied "text/plain" after independently
+  // confirming the actual bytes look like real text (see
+  // looksLikePlainText's own doc comment for exactly what that checks).
+  // Content this doesn't recognize is rejected regardless of file name.
   const ext = path.split(".").pop()?.toLowerCase();
-  if (ext === "txt") return "text/plain";
+  if (ext === "txt" && looksLikePlainText(buffer)) return "text/plain";
   return null;
 }
 

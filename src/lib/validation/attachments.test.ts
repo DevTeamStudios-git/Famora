@@ -3,6 +3,7 @@ import {
   categoryForMime,
   isVoiceRecordingMimeType,
   extensionForVoiceMime,
+  looksLikePlainText,
 } from "@/lib/validation/attachments";
 
 describe("attachment validation", () => {
@@ -60,6 +61,56 @@ describe("attachment validation", () => {
       expect(extensionForVoiceMime("audio/ogg")).toBe("ogg");
       expect(extensionForVoiceMime("audio/wav")).toBe("wav");
       expect(extensionForVoiceMime("audio/mpeg")).toBe("mp3");
+    });
+  });
+
+  describe("looksLikePlainText", () => {
+    const enc = (s: string) => new TextEncoder().encode(s);
+
+    it("accepts real plain text", () => {
+      expect(looksLikePlainText(enc("Grandma's lasagna recipe:\n\n1 lb ground beef\n..."))).toBe(
+        true,
+      );
+    });
+
+    it("accepts an empty buffer", () => {
+      expect(looksLikePlainText(new Uint8Array(0))).toBe(true);
+    });
+
+    it("accepts text with common whitespace control characters", () => {
+      expect(looksLikePlainText(enc("line one\r\nline two\ttabbed"))).toBe(true);
+    });
+
+    it("rejects content with a NUL byte (near-certain binary signal)", () => {
+      const bytes = enc("looks like text");
+      const withNul = new Uint8Array([...bytes, 0, ...bytes]);
+      expect(looksLikePlainText(withNul)).toBe(false);
+    });
+
+    it("rejects a real binary signature (e.g. a stray/mislabeled ELF header)", () => {
+      // 0x7F 'E' 'L' 'F' — an ELF executable's magic bytes, named "*.txt" by
+      // an attacker to probe the extension-based fallback this test guards.
+      expect(looksLikePlainText(new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]))).toBe(
+        false,
+      );
+    });
+
+    it("rejects content with a high density of control bytes", () => {
+      const junk = new Uint8Array(200).fill(0x01); // well outside the 1% control-byte tolerance
+      expect(looksLikePlainText(junk)).toBe(false);
+    });
+
+    it("rejects invalid UTF-8", () => {
+      // 0xFF is never valid as a standalone UTF-8 byte.
+      expect(looksLikePlainText(new Uint8Array([0xff, 0xfe, 0xfd]))).toBe(false);
+    });
+
+    it("tolerates a multi-byte UTF-8 character split at the read-buffer boundary", () => {
+      // "café" — the "é" is 2 bytes (0xC3 0xA9). Truncate mid-character, the
+      // way sniff.ts's fixed-size read window could split a real file.
+      const full = enc("café");
+      const truncatedMidCharacter = full.subarray(0, full.length - 1);
+      expect(looksLikePlainText(truncatedMidCharacter)).toBe(true);
     });
   });
 });
