@@ -46,6 +46,7 @@ const FEATURE_KEYS = [
   "memories",
   "announcements",
   "tools",
+  "agenda",
 ] as const;
 
 async function main() {
