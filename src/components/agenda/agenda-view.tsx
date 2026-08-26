@@ -636,41 +636,42 @@ export function AgendaView({
 
   return (
     <div className="flex h-full flex-col bg-background overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-10 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="icon" onClick={() => setLeftPanelOpen(!leftPanelOpen)} aria-label="Toggle calendar panel">
-            <Calendar className="h-5 w-5" />
+      <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-4 p-2 sm:p-4 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-10 flex-shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Button variant="ghost" size="icon" className="h-8 w-8 sm:h-10 sm:w-10" onClick={() => setLeftPanelOpen(!leftPanelOpen)} aria-label="Toggle calendar panel">
+            <Calendar className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
           <div className="hidden sm:flex items-center gap-2">
-            <span className="text-lg font-semibold">Famora</span>
-            <Separator className="h-6" orientation="vertical" />
-            <span className="text-lg font-medium text-muted-foreground">Agenda</span>
+            <span className="text-base sm:text-lg font-semibold">Famora</span>
+            <Separator className="h-6 hidden sm:block" orientation="vertical" />
+            <span className="text-base sm:text-lg font-medium text-muted-foreground hidden md:inline">Agenda</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-1 justify-center">
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={goToToday} className="gap-1">
-              <Home className="h-3.5 w-3.5" />
+        <div className="flex items-center gap-1 sm:gap-2 flex-1 justify-center order-last sm:order-none w-full sm:w-auto mt-2 sm:mt-0">
+          <div className="flex items-center gap-1 sm:gap-2">
+            <Button variant="outline" size="sm" onClick={goToToday} className="gap-1 h-7 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm">
+              <Home className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
               <span>Today</span>
             </Button>
-            <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Previous period">
+            <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-10 sm:w-10" onClick={() => navigate(-1)} aria-label="Previous period">
               <ChevronLeft className="h-4 w-4" />
             </Button>
-            <span className="text-lg font-semibold w-56 text-center sm:w-auto">{getCurrentDateDisplay()}</span>
-            <Button variant="ghost" size="icon" onClick={() => navigate(1)} aria-label="Next period">
+            <span className="text-sm sm:text-lg font-semibold text-center min-w-[140px] sm:min-w-0 sm:w-56 truncate">{getCurrentDateDisplay()}</span>
+            <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-10 sm:w-10" onClick={() => navigate(1)} aria-label="Next period">
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex items-center gap-1 sm:gap-2 ml-auto">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1">
-                <Calendar className="h-4 w-4" />
+              <Button variant="outline" size="sm" className="gap-1 h-7 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm">
+                <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">{view.charAt(0).toUpperCase() + view.slice(1)}</span>
-                <ChevronDown className="h-4 w-4" />
+                <span className="sm:hidden">{view.charAt(0).toUpperCase()}</span>
+                <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-40" align="end">
@@ -687,9 +688,10 @@ export function AgendaView({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <Button className="ml-2 gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
-            <Plus className="h-4 w-4" />
+          <Button className="gap-1 sm:gap-2 bg-primary text-primary-foreground hover:bg-primary/90 h-7 sm:h-9 px-2 sm:px-4 text-xs sm:text-sm">
+            <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             <span className="hidden sm:inline">Create</span>
+            <span className="sm:hidden">Create</span>
           </Button>
         </div>
       </div>

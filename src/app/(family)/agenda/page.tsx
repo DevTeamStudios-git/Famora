@@ -50,7 +50,7 @@ export default async function AgendaPage() {
   ]);
 
   return (
-    <div className="agenda-full-bleed flex flex-col">
+    <div className="agenda-full-bleed flex flex-1 min-h-0 flex-col">
       <AgendaView
         familyId={familyId}
         memberId={memberId}
