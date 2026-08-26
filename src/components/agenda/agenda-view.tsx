@@ -215,53 +215,56 @@ export function AgendaView({
     const allDayEvents = visibleEvents.filter((e) => e.allDay);
 
     return (
-      <div className="flex h-full overflow-hidden">
-        <div className="flex-shrink-0 w-[52px] sm:w-[64px] border-r border-border bg-muted/20 flex-shrink-0">
-          <div className="h-12 border-b border-border" />
-          {hours.map((h) => (
-            <div key={h} className="relative h-[60px] sm:h-[60px] border-b border-border/50 text-[10px] sm:text-xs text-right pr-2 sm:pr-3 text-muted-foreground" style={{ height: "60px" }}>
-              <span className="absolute -top-2 right-2 sm:right-3 bg-muted/30 px-1 leading-none">{formatHourLabel(h)}</span>
-            </div>
-          ))}
-        </div>
-        <div className="flex-1 relative min-w-0 overflow-auto">
-          {allDayEvents.length > 0 && (
-            <div className="h-12 border-b border-border bg-muted/30 px-2 overflow-x-auto">
-              <div className="flex items-center gap-1 h-full">
-                <span className="text-xs font-medium text-muted-foreground w-16 shrink-0">ALL DAY</span>
-                <div className="flex gap-1 flex-1">
-                  {allDayEvents.map((e) => (
-                    <div key={e.id} className="flex-1 min-w-[100px] px-1.5 py-1 rounded text-xs cursor-pointer hover:opacity-80" style={getEventStyle(e)} onClick={() => setSelectedEvent(e)}>
-                      {e.title}
-                    </div>
-                  ))}
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-background">
+        {allDayEvents.length > 0 && (
+          <div className="h-12 shrink-0 border-b border-border bg-muted/30 px-2 flex items-center gap-1 overflow-hidden">
+            <span className="text-xs font-medium text-muted-foreground w-16 shrink-0">ALL DAY</span>
+            <div className="flex gap-1 flex-1 overflow-hidden">
+              {allDayEvents.map((e) => (
+                <div key={e.id} className="flex-1 min-w-[100px] px-1.5 py-1 rounded text-xs cursor-pointer hover:opacity-80" style={getEventStyle(e)} onClick={() => setSelectedEvent(e)}>
+                  {e.title}
                 </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable] overscroll-contain">
+          <div className="flex w-full min-h-[1080px]">
+            <div className="w-[52px] sm:w-[64px] shrink-0 border-r border-border bg-muted/20">
+              <div className="h-[24px] border-b border-transparent" />
+              {hours.map((h) => (
+                <div key={h} className="relative h-[60px] border-b border-border/50 text-[10px] sm:text-xs text-right pr-2 sm:pr-3 text-muted-foreground">
+                  <span className="absolute -top-2 right-2 sm:right-3 bg-background px-1 leading-none">{formatHourLabel(h)}</span>
+                </div>
+              ))}
+              <div className="h-[24px]" />
+            </div>
+            <div className="flex-1 relative min-w-0 bg-background">
+              <div className="absolute inset-0">
+                {hours.map((h) => (
+                  <div key={h} className="absolute left-0 right-0 border-t border-border/50" style={{ top: `${(h - 6) * 60 + 24}px` }} />
+                ))}
+                {isToday(currentDate) && (
+                  <div className="absolute left-0 right-0 h-0.5 bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.8)]" style={{ top: `${getEventTop(now) + 24}px` }}>
+                    <div className="absolute -left-3 -top-1.5 w-3 h-3 rounded-full bg-red-500 border-2 border-background" />
+                  </div>
+                )}
+                {dayEvents
+                  .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
+                  .map((e) => {
+                    const start = new Date(e.startAt);
+                    const end = new Date(e.endAt);
+                    const top = getEventTop(start) + 24;
+                    const height = getEventHeight(start, end);
+                    return (
+                      <div key={e.id} className="absolute left-1 right-1 sm:left-2 sm:right-2 rounded px-2 py-1 text-xs cursor-pointer hover:opacity-80 hover:shadow-md transition-all z-10 border-l-2" style={{ top: `${top}px`, height: `${height}px`, ...getEventStyle(e), borderLeftColor: getEventStyle(e).borderLeftColor }} onClick={(ev) => { ev.stopPropagation(); setSelectedEvent(e); }}>
+                        <div className="font-medium truncate">{e.title}</div>
+                        <div className="text-xs opacity-70">{formatTime(e.startAt)} - {formatTime(e.endAt)}</div>
+                      </div>
+                    );
+                  })}
               </div>
             </div>
-          )}
-          <div className="relative" style={{ height: `${18 * 60}px` }}>
-            {hours.map((h) => (
-              <div key={h} className="absolute left-0 right-0 border-t border-border/50" style={{ top: `${(h - 6) * 60}px` }} />
-            ))}
-            {isToday(currentDate) && (
-              <div className="absolute left-0 right-0 h-0.5 bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.8)]" style={{ top: `${getEventTop(now)}px` }}>
-                <div className="absolute -left-3 -top-1.5 w-3 h-3 rounded-full bg-red-500 border-2 border-background" />
-              </div>
-            )}
-            {dayEvents
-              .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
-              .map((e) => {
-                const start = new Date(e.startAt);
-                const end = new Date(e.endAt);
-                const top = getEventTop(start);
-                const height = getEventHeight(start, end);
-                return (
-                  <div key={e.id} className="absolute left-1 right-1 rounded px-2 py-1 text-xs cursor-pointer hover:opacity-80 hover:shadow-md transition-all z-10" style={{ top: `${top}px`, height: `${height}px`, ...getEventStyle(e) }} onClick={(ev) => { ev.stopPropagation(); setSelectedEvent(e); }}>
-                    <div className="font-medium truncate">{e.title}</div>
-                    <div className="text-xs opacity-70">{formatTime(e.startAt)} - {formatTime(e.endAt)}</div>
-                  </div>
-                );
-              })}
           </div>
         </div>
       </div>
@@ -269,6 +272,70 @@ export function AgendaView({
   };
 
   const renderWeekView = () => {
+    const start = startOfWeek(currentDate, { weekStartsOn: 1 });
+    const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+    const hours = Array.from({ length: 18 }, (_, i) => i + 6);
+
+    return (
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-background">
+        <div className="flex flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable] overscroll-contain">
+          <div className="flex w-full min-h-[1080px] min-w-[700px]">
+            <div className="w-[52px] sm:w-[64px] shrink-0 border-r border-border bg-muted/20 sticky left-0 z-10">
+              <div className="h-12 border-b border-border bg-muted/20" />
+              {hours.map((h) => (
+                <div key={h} className="relative h-[60px] border-b border-border/50 text-[10px] sm:text-xs text-right pr-2 sm:pr-3 text-muted-foreground bg-muted/20">
+                  <span className="absolute -top-2 right-2 sm:right-3 bg-muted/20 px-1 leading-none">{formatHourLabel(h)}</span>
+                </div>
+              ))}
+              <div className="h-[24px]" />
+            </div>
+            <div className="flex flex-1 min-w-0">
+              {days.map((day, d) => {
+                const isTodayDay = isToday(day);
+                const dayEvents = visibleEvents.filter((e) => {
+                  const eventStart = new Date(e.startAt);
+                  return isSameDay(eventStart, day) && !e.allDay;
+                }).sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+
+                return (
+                  <div key={d} className={cn("flex-1 relative border-r border-border min-w-[110px] sm:min-w-[140px] flex flex-col", isTodayDay && "bg-primary/[0.03]")}>
+                    <div className={cn("h-12 shrink-0 border-b border-border px-2 text-center text-xs sm:text-sm font-medium sticky top-0 bg-background z-10", isTodayDay && "bg-primary/10 text-primary")}>
+                      <div>{format(day, "EEE")}</div>
+                      <div className="text-[11px]">{format(day, "d MMM")}</div>
+                    </div>
+                    <div className="relative flex-1 min-h-[1080px] bg-background">
+                      {hours.map((h) => (
+                        <div key={h} className="absolute left-0 right-0 border-b border-border/30" style={{ top: `${(h - 6) * 60 + 24}px`, height: "60px" }} />
+                      ))}
+                      {dayEvents.map((e) => {
+                        const s = new Date(e.startAt);
+                        const en = new Date(e.endAt);
+                        const top = getEventTop(s) + 24;
+                        const height = getEventHeight(s, en);
+                        return (
+                          <div key={e.id} className="absolute left-1 right-1 rounded px-1 py-0.5 text-[10px] leading-tight cursor-pointer hover:opacity-80 hover:shadow-sm border-l-2 overflow-hidden" style={{ top: `${top}px`, height: `${height}px`, ...getEventStyle(e), borderLeftColor: getEventStyle(e).borderLeftColor }} onClick={(ev) => { ev.stopPropagation(); setSelectedEvent(e); }}>
+                            <div className="font-medium truncate">{e.title}</div>
+                            <div className="opacity-70 hidden sm:block">{formatTime(e.startAt)}</div>
+                          </div>
+                        );
+                      })}
+                      {isTodayDay && (
+                        <div className="absolute left-0 right-0 h-0.5 bg-red-500 z-20" style={{ top: `${getEventTop(now) + 24}px` }}>
+                          <div className="absolute -left-1 -top-1 w-2 h-2 rounded-full bg-red-500" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const __REPLACED_WEEK__ = () => {
     const start = startOfWeek(currentDate, { weekStartsOn: 1 });
     const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
     const hours = Array.from({ length: 18 }, (_, i) => i + 6);
