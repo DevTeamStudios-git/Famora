@@ -100,6 +100,20 @@ export function AgendaView({
     return () => clearInterval(interval);
   }, []);
 
+  // Mobile: default to Agenda view (time-grid is unusable on small screens)
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mql = window.matchMedia("(max-width: 767px)");
+    const apply = () => {
+      if (mql.matches && (view === "day" || view === "week")) {
+        setView("agenda");
+      }
+    };
+    apply();
+    // only on mount, don't override user choice after
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const getDateRange = React.useCallback(() => {
     const date = currentDate;
     switch (view) {
@@ -181,7 +195,8 @@ export function AgendaView({
     return { backgroundColor: color + "20", borderLeftColor: color };
   };
 
-  const formatTime = (date: Date | string) => format(new Date(date), "HH:mm");
+  const formatTime = (date: Date | string) => format(new Date(date), "h:mm a");
+  const formatHourLabel = (h: number) => format(new Date(0, 0, 0, h, 0, 0, 0), "h a");
 
   const getEventTop = (date: Date) => {
     const hours = date.getHours();
@@ -201,11 +216,11 @@ export function AgendaView({
 
     return (
       <div className="flex h-full overflow-hidden">
-        <div className="flex-shrink-0 w-[60px] border-r border-border bg-muted/30 flex-shrink-0">
+        <div className="flex-shrink-0 w-[52px] sm:w-[64px] border-r border-border bg-muted/20 flex-shrink-0">
           <div className="h-12 border-b border-border" />
           {hours.map((h) => (
-            <div key={h} className="h-24 border-b border-border/50 text-xs text-right pr-2 text-muted-foreground flex items-end" style={{ height: "60px" }}>
-              {format(new Date(0, 0, 0, h), "ha")}
+            <div key={h} className="relative h-[60px] sm:h-[60px] border-b border-border/50 text-[10px] sm:text-xs text-right pr-2 sm:pr-3 text-muted-foreground" style={{ height: "60px" }}>
+              <span className="absolute -top-2 right-2 sm:right-3 bg-muted/30 px-1 leading-none">{formatHourLabel(h)}</span>
             </div>
           ))}
         </div>
@@ -260,15 +275,15 @@ export function AgendaView({
 
     return (
       <div className="flex flex-1 overflow-auto">
-        <div className="flex-shrink-0 w-[60px] border-r border-border bg-muted/30 flex-shrink-0">
+        <div className="flex-shrink-0 w-[52px] sm:w-[64px] border-r border-border bg-muted/30 flex-shrink-0">
           <div className="h-12 border-b border-border" />
           {hours.map((h) => (
-            <div key={h} className="h-24 border-b border-border/50 text-xs text-right pr-2 text-muted-foreground" style={{ height: "60px" }}>
-              {format(new Date(0, 0, 0, h), "ha")}
+            <div key={h} className="relative h-[60px] border-b border-border/50 text-[10px] sm:text-xs text-right pr-2 sm:pr-3 text-muted-foreground" style={{ height: "60px" }}>
+              <span className="absolute -top-2 right-2 sm:right-3 bg-muted/30 px-1 leading-none">{formatHourLabel(h)}</span>
             </div>
           ))}
         </div>
-        <div className="flex-1 flex overflow-x-auto">
+        <div className="flex-1 flex overflow-x-auto min-w-0">
           {days.map((day, d) => {
             const isTodayDay = isToday(day);
             const dayEvents = visibleEvents.filter((e) => {
