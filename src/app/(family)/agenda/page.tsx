@@ -5,7 +5,6 @@ import { getAccessState } from "@/lib/auth/session";
 import { hasPermission } from "@/lib/authorization/authorization";
 import { getFamilyWithFeatures } from "@/server/queries/family";
 import { listFamilyEvents, listFamilyEventCategories, listFamilyMembersForAgenda } from "@/server/queries/agenda";
-import { PageHeader } from "@/components/core/page-header";
 import { EmptyState } from "@/components/core/empty-state";
 import { AgendaView } from "@/components/agenda/agenda-view";
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek } from "date-fns";
@@ -25,20 +24,17 @@ export default async function AgendaPage() {
 
   if (!hasPermission(membership, "agenda.read") || !agendaEnabled) {
     return (
-      <>
-        <PageHeader title="Family Agenda" description="Shared family calendar with day, week, month and list views." />
-        <div className="mt-6">
-          <EmptyState
-            icon={CalendarDays}
-            title={agendaEnabled ? "No access to Family Agenda" : "Family Agenda is disabled"}
-            description={
-              agendaEnabled
-                ? "You don't have permission to view the Family Agenda."
-                : "A Family Chief or Co-Chief has turned this tool off for now."
-            }
-          />
-        </div>
-      </>
+      <div className="mt-6">
+        <EmptyState
+          icon={CalendarDays}
+          title={agendaEnabled ? "No access to Family Agenda" : "Family Agenda is disabled"}
+          description={
+            agendaEnabled
+              ? "You don't have permission to view the Family Agenda."
+              : "A Family Chief or Co-Chief has turned this tool off for now."
+          }
+        />
+      </div>
     );
   }
 
@@ -54,14 +50,13 @@ export default async function AgendaPage() {
   ]);
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      <PageHeader title="Family Agenda" description="Shared family calendar with day, week, month and list views." />
+    <div className="-mx-4 -my-6 flex h-[calc(100dvh-3.5rem)] flex-col sm:-mx-6 lg:-mx-8 lg:-my-8 lg:h-[calc(100dvh-3.5rem)]">
       <AgendaView
-        _familyId={familyId}
-        _memberId={memberId}
+        familyId={familyId}
+        memberId={memberId}
         initialEvents={events}
-        _initialCategories={categories}
-        _initialMembers={members}
+        initialCategories={categories}
+        initialMembers={members}
       />
     </div>
   );
