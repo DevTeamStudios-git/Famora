@@ -122,6 +122,20 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Agenda full-bleed: breaks out of AppShell's max-w-6xl when agenda is present */
+main:has(.agenda-full-bleed) {
+  max-width: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: 100% !important;
+}
+
+.agenda-full-bleed {
+  width: 100%;
+  height: calc(100dvh - 3.5rem);
+  min-height: 0;
+}
+
 ::selection {
   background: color-mix(in oklch, var(--primary) 22%, transparent);
 }
