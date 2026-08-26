@@ -210,7 +210,7 @@ export function AgendaView({
   };
 
   const renderDayView = () => {
-    const hours = Array.from({ length: 18 }, (_, i) => i + 6);
+    const hours = Array.from({ length: 24 }, (_, i) => i);
     const dayEvents = visibleEvents.filter((e) => !e.allDay && isWithinInterval(new Date(e.startAt), { start: rangeStart, end: rangeEnd }));
     const allDayEvents = visibleEvents.filter((e) => e.allDay);
 
@@ -228,8 +228,8 @@ export function AgendaView({
             </div>
           </div>
         )}
-        <div className="flex flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable] overscroll-contain">
-          <div className="flex w-full min-h-[1080px]">
+        <div className="flex flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable] overscroll-contain rounded-xl border border-border bg-card shadow-sm mx-2 mb-2 sm:mx-3 sm:mb-3">
+          <div className="flex w-full min-h-[1440px]">
             <div className="w-[52px] sm:w-[64px] shrink-0 border-r border-border bg-muted/20">
               <div className="h-[24px] border-b border-transparent" />
               {hours.map((h) => (
@@ -242,7 +242,7 @@ export function AgendaView({
             <div className="flex-1 relative min-w-0 bg-background">
               <div className="absolute inset-0">
                 {hours.map((h) => (
-                  <div key={h} className="absolute left-0 right-0 border-t border-border/50" style={{ top: `${(h - 6) * 60 + 24}px` }} />
+                  <div key={h} className="absolute left-0 right-0 border-t border-border/50" style={{ top: `${h * 60 + 24}px` }} />
                 ))}
                 {isToday(currentDate) && (
                   <div className="absolute left-0 right-0 h-0.5 bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.8)]" style={{ top: `${getEventTop(now) + 24}px` }}>
@@ -260,6 +260,7 @@ export function AgendaView({
                       <div key={e.id} className="absolute left-1 right-1 sm:left-2 sm:right-2 rounded px-2 py-1 text-xs cursor-pointer hover:opacity-80 hover:shadow-md transition-all z-10 border-l-2" style={{ top: `${top}px`, height: `${height}px`, ...getEventStyle(e), borderLeftColor: getEventStyle(e).borderLeftColor }} onClick={(ev) => { ev.stopPropagation(); setSelectedEvent(e); }}>
                         <div className="font-medium truncate">{e.title}</div>
                         <div className="text-xs opacity-70">{formatTime(e.startAt)} - {formatTime(e.endAt)}</div>
+                        <div className="absolute bottom-0 left-0 right-0 h-1.5 cursor-ns-resize opacity-0 group-hover/event:opacity-100 bg-white/40 rounded-b" title="Drag to extend" />
                       </div>
                     );
                   })}
@@ -274,12 +275,12 @@ export function AgendaView({
   const renderWeekView = () => {
     const start = startOfWeek(currentDate, { weekStartsOn: 1 });
     const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-    const hours = Array.from({ length: 18 }, (_, i) => i + 6);
+    const hours = Array.from({ length: 24 }, (_, i) => i);
 
     return (
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-background">
         <div className="flex flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable] overscroll-contain">
-          <div className="flex w-full min-h-[1080px] min-w-[700px]">
+          <div className="flex w-full min-h-[1440px] min-w-[700px]">
             <div className="w-[52px] sm:w-[64px] shrink-0 border-r border-border bg-muted/20 sticky left-0 z-10">
               <div className="h-12 border-b border-border bg-muted/20" />
               {hours.map((h) => (
@@ -303,9 +304,9 @@ export function AgendaView({
                       <div>{format(day, "EEE")}</div>
                       <div className="text-[11px]">{format(day, "d MMM")}</div>
                     </div>
-                    <div className="relative flex-1 min-h-[1080px] bg-background">
+                    <div className="relative flex-1 min-h-[1440px] bg-background">
                       {hours.map((h) => (
-                        <div key={h} className="absolute left-0 right-0 border-b border-border/30" style={{ top: `${(h - 6) * 60 + 24}px`, height: "60px" }} />
+                        <div key={h} className="absolute left-0 right-0 border-b border-border/30" style={{ top: `${h * 60 + 24}px`, height: "60px" }} />
                       ))}
                       {dayEvents.map((e) => {
                         const s = new Date(e.startAt);
@@ -338,7 +339,7 @@ export function AgendaView({
   const __REPLACED_WEEK__ = () => {
     const start = startOfWeek(currentDate, { weekStartsOn: 1 });
     const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
-    const hours = Array.from({ length: 18 }, (_, i) => i + 6);
+    const hours = Array.from({ length: 24 }, (_, i) => i);
 
     return (
       <div className="flex flex-1 overflow-auto">
@@ -371,7 +372,7 @@ export function AgendaView({
                     </div>
                   ))}
                 </div>
-                <div className="relative flex-1" style={{ height: `${18 * 60}px` }}>
+                <div className="relative flex-1" style={{ height: `${24 * 60}px` }}>
                   {hours.map((h) => (
                     <div key={h} className="w-full border-b border-border/50" style={{ height: "60px" }} />
                   ))}
@@ -381,7 +382,7 @@ export function AgendaView({
                     const top = getEventTop(start);
                     const height = getEventHeight(start, end);
                     return (
-                      <div key={e.id} className="absolute left-1 right-1 rounded px-1 py-0.5 text-[10px] cursor-pointer hover:opacity-80 hover:shadow-sm" style={{ top: `${top}px`, height: `${height}px`, ...getEventStyle(e) }} onClick={(ev) => { ev.stopPropagation(); setSelectedEvent(e); }}>
+                      <div key={e.id} className="absolute left-1 right-1 rounded px-1 py-0.5 text-[10px] cursor-pointer hover:opacity-80 hover:shadow-sm group/event" style={{ top: `${top}px`, height: `${height}px`, ...getEventStyle(e) }} onClick={(ev) => { ev.stopPropagation(); setSelectedEvent(e); }}>
                         <div className="font-medium truncate">{e.title}</div>
                         <div className="opacity-70">{formatTime(e.startAt)} - {formatTime(e.endAt)}</div>
                       </div>
