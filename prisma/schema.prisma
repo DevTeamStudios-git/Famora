@@ -193,6 +193,38 @@ enum NotificationChannel {
   @@map("notification_channel")
 }
 
+enum CalendarKind {
+  FAMILY
+  PERSONAL
+  BIRTHDAYS
+  TASKS
+  HOLIDAYS
+
+  @@map("calendar_kind")
+}
+
+enum CalendarColor {
+  INDIGO
+  TEAL
+  MOSS
+  AMBER
+  CORAL
+  ROSE
+  VIOLET
+  SKY
+  SLATE
+
+  @@map("calendar_color")
+}
+
+enum EventStatus {
+  CONFIRMED
+  TENTATIVE
+  CANCELLED
+
+  @@map("event_status")
+}
+
 // ---------------------------------------------------------------------------
 // Identity & users
 // ---------------------------------------------------------------------------
@@ -278,6 +310,7 @@ model Family {
   conversations   Conversation[]
   agendaEvents    CalendarEvent[]
   eventCategories EventCategory[]
+  calendars       Calendar[]
   tasks           Task[]
   notebooks       Notebook[]
   folders         Folder[]
@@ -362,6 +395,14 @@ model FamilyMember {
   memoryComments          MemoryComment[]
   memoryReactions         MemoryReaction[]
   chatUploadStaging       ChatUploadStaging[]
+  ownedCalendars          Calendar[]              @relation("CalendarOwner")
+  calendarPreferences     CalendarPreference[]
+  createdCalendarEvents   CalendarEvent[]         @relation("EventCreator")
+  organizedCalendarEvents CalendarEvent[]         @relation("EventOrganizer")
+  calendarEventComments   CalendarEventComment[]
+  calendarEventParticipations CalendarEventParticipant[]
+  calendarEventReminders  CalendarEventReminder[]
+  calendarEventAttachments CalendarEventAttachment[]
 
   @@unique([familyId, userId])
   @@index([userId])
@@ -699,10 +740,52 @@ model EventCategory {
   @@map("event_categories")
 }
 
+model Calendar {
+  id          String        @id @default(uuid()) @db.Uuid
+  familyId    String        @db.Uuid
+  ownerId     String?       @db.Uuid
+  kind        CalendarKind  @default(FAMILY)
+  name        String        @db.VarChar(80)
+  description String?       @db.VarChar(280)
+  color       CalendarColor @default(INDIGO)
+  icon        String?       @db.VarChar(32)
+  isDefault   Boolean       @default(false)
+  isSystem    Boolean       @default(false)
+  sortOrder   Int           @default(0)
+  archivedAt  DateTime?     @db.Timestamptz(6)
+  createdAt   DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime      @updatedAt @db.Timestamptz(6)
+
+  family      Family               @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  owner       FamilyMember?        @relation("CalendarOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  events      CalendarEvent[]
+  preferences CalendarPreference[]
+
+  @@unique([familyId, ownerId, name])
+  @@index([familyId, ownerId, sortOrder])
+  @@map("calendars")
+}
+
+model CalendarPreference {
+  calendarId    String         @db.Uuid
+  memberId      String         @db.Uuid
+  isVisible     Boolean        @default(true)
+  colorOverride CalendarColor?
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
+
+  calendar Calendar     @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  member   FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([calendarId, memberId])
+  @@index([memberId])
+  @@map("calendar_preferences")
+}
+
 model CalendarEvent {
   id                String          @id @default(uuid()) @db.Uuid
   familyId          String          @db.Uuid
   categoryId        String?         @db.Uuid
+  calendarId        String?         @db.Uuid
   title             String
   description       String?         @db.Text
   location          String?
@@ -712,18 +795,41 @@ model CalendarEvent {
   allDay            Boolean         @default(false)
   visibility        EventVisibility @default(FAMILY)
   recurrenceRule    String? // RFC 5545 RRULE
+  timeZone          String          @default("UTC") @db.VarChar(64)
+  recurrenceEndsAt  DateTime?       @db.Timestamptz(6)
+  recurrenceExceptions DateTime[]   @db.Timestamptz(6)
+  recurrenceParentId String?        @db.Uuid
+  recurrenceInstanceAt DateTime?   @db.Timestamptz(6)
+  status            EventStatus     @default(CONFIRMED)
+  version           Int             @default(1)
+  color             CalendarColor?
   createdByMemberId String          @db.Uuid
   updatedByMemberId String?         @db.Uuid
+  createdById       String?         @db.Uuid
+  organizerId       String?         @db.Uuid
   deletedAt         DateTime?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt @default(now())
 
   family    Family          @relation(fields: [familyId], references: [id], onDelete: Cascade)
   category  EventCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  calendar  Calendar?       @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  parent    CalendarEvent?  @relation("EventOverrides", fields: [recurrenceParentId], references: [id], onDelete: Cascade)
+  overrides CalendarEvent[] @relation("EventOverrides")
   attendees EventAttendee[]
   reminders EventReminder[]
+  participants CalendarEventParticipant[]
+  calendarReminders CalendarEventReminder[]
+  attachments CalendarEventAttachment[]
+  comments     CalendarEventComment[]
+  checklist    CalendarEventChecklistItem[]
+  createdBy   FamilyMember? @relation("EventCreator", fields: [createdById], references: [id])
+  organizer   FamilyMember? @relation("EventOrganizer", fields: [organizerId], references: [id])
 
   @@index([familyId, startAt])
+  @@index([calendarId, startAt])
+  @@index([familyId, recurrenceRule, recurrenceEndsAt])
+  @@unique([recurrenceParentId, recurrenceInstanceAt])
   @@map("calendar_events")
 }
 
@@ -750,6 +856,88 @@ model EventReminder {
 
   @@index([eventId])
   @@map("event_reminders")
+}
+
+model CalendarEventParticipant {
+  id        String     @id @default(uuid()) @db.Uuid
+  eventId   String     @db.Uuid
+  memberId  String?    @db.Uuid
+  guestName String?    @db.VarChar(120)
+  guestEmail String?   @db.VarChar(200)
+  rsvp      RsvpStatus @default(NONE)
+  rsvpNote  String?    @db.VarChar(280)
+  isOptional Boolean   @default(false)
+  respondedAt DateTime? @db.Timestamptz(6)
+  createdAt DateTime   @default(now()) @db.Timestamptz(6)
+
+  event  CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  member FamilyMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, memberId])
+  @@index([memberId, rsvp])
+  @@map("calendar_event_participants")
+}
+
+model CalendarEventReminder {
+  id        String   @id @default(uuid()) @db.Uuid
+  eventId   String   @db.Uuid
+  memberId  String?  @db.Uuid
+  minutesBefore Int
+  channel   String   @default("PUSH") @db.VarChar(16)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  event  CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  member FamilyMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, memberId, minutesBefore, channel])
+  @@map("calendar_event_reminders")
+}
+
+model CalendarEventAttachment {
+  id             String   @id @default(uuid()) @db.Uuid
+  eventId        String   @db.Uuid
+  fileId         String?  @db.Uuid
+  notebookPageId String?  @db.Uuid
+  addedById      String   @db.Uuid
+  createdAt      DateTime @default(now()) @db.Timestamptz(6)
+
+  event CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  addedBy FamilyMember @relation(fields: [addedById], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@map("calendar_event_attachments")
+}
+
+model CalendarEventComment {
+  id        String    @id @default(uuid()) @db.Uuid
+  eventId   String    @db.Uuid
+  authorId  String    @db.Uuid
+  body      String    @db.Text
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime  @updatedAt @db.Timestamptz(6)
+  deletedAt DateTime? @db.Timestamptz(6)
+
+  event  CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  author FamilyMember  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, createdAt])
+  @@map("calendar_event_comments")
+}
+
+model CalendarEventChecklistItem {
+  id            String    @id @default(uuid()) @db.Uuid
+  eventId       String    @db.Uuid
+  label         String    @db.VarChar(200)
+  isDone        Boolean   @default(false)
+  assignedToId  String?   @db.Uuid
+  completedById String?   @db.Uuid
+  completedAt   DateTime? @db.Timestamptz(6)
+  sortOrder     Int       @default(0)
+
+  event CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, sortOrder])
+  @@map("calendar_event_checklist_items")
 }
 
 // ---------------------------------------------------------------------------
