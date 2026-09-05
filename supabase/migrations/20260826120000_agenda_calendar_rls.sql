@@ -49,17 +49,24 @@ create policy calendars_insert on public.calendars for insert
 
 create policy calendars_update on public.calendars for update
   using (
-    "ownerId" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = "familyId" and fm.status = 'ACTIVE' limit 1)
-    or private.famora_can_manage_agenda("familyId")
+    private.famora_can_read_calendar(id)
+    and (
+      "ownerId" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = "familyId" and fm.status = 'ACTIVE' limit 1)
+      or private.famora_can_manage_agenda("familyId")
+    )
   )
   with check (
-    "ownerId" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = "familyId" and fm.status = 'ACTIVE' limit 1)
-    or private.famora_can_manage_agenda("familyId")
+    private.famora_can_read_calendar(id)
+    and (
+      "ownerId" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = "familyId" and fm.status = 'ACTIVE' limit 1)
+      or private.famora_can_manage_agenda("familyId")
+    )
   );
 
 create policy calendars_delete on public.calendars for delete
   using (
-    "isSystem" = false
+    private.famora_can_read_calendar(id)
+    and "isSystem" = false
     and (
       "ownerId" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = "familyId" and fm.status = 'ACTIVE' limit 1)
       or private.famora_can_manage_agenda("familyId")
@@ -133,21 +140,27 @@ create policy participants_insert on public.calendar_event_participants for inse
 
 create policy participants_update on public.calendar_event_participants for update
   using (
-    "memberId" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = (select e."familyId" from public.calendar_events e where e.id = "eventId") and fm.status = 'ACTIVE' limit 1)
-    or exists (
-      select 1 from public.calendar_events e
-      where e.id = "eventId"
-        and (e."createdById" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = e."familyId" and fm.status = 'ACTIVE' limit 1) or private.famora_can_manage_agenda(e."familyId"))
+    private.famora_can_read_calendar((select e."calendarId" from public.calendar_events e where e.id = "eventId"))
+    and (
+      "memberId" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = (select e."familyId" from public.calendar_events e where e.id = "eventId") and fm.status = 'ACTIVE' limit 1)
+      or exists (
+        select 1 from public.calendar_events e
+        where e.id = "eventId"
+          and (e."createdById" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = e."familyId" and fm.status = 'ACTIVE' limit 1) or private.famora_can_manage_agenda(e."familyId"))
+      )
     )
   )
   with check (true);
 
 create policy participants_delete on public.calendar_event_participants for delete
-  using (exists (
-    select 1 from public.calendar_events e
-    where e.id = "eventId"
-      and (e."createdById" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = e."familyId" and fm.status = 'ACTIVE' limit 1) or private.famora_can_manage_agenda(e."familyId"))
-  ));
+  using (
+    private.famora_can_read_calendar((select e."calendarId" from public.calendar_events e where e.id = "eventId"))
+    and exists (
+      select 1 from public.calendar_events e
+      where e.id = "eventId"
+        and (e."createdById" = (select fm.id from public.family_members fm where fm."userId" = private.famora_auth_uid() and fm."familyId" = e."familyId" and fm.status = 'ACTIVE' limit 1) or private.famora_can_manage_agenda(e."familyId"))
+    )
+  );
 
 -- ------------------------- reminders / attachments / comments / checklist
 do $$
