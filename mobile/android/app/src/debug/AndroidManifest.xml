@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Android 17 protects LAN requests, including the emulator test backend. -->
+  <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+</manifest>

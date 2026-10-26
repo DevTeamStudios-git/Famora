@@ -3,9 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { env } from "@/lib/env";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { isSupabaseConfigured } from "@/lib/env";
 
 export default function LoginPage() {
@@ -18,15 +23,26 @@ export default function LoginPage() {
     setError(null);
     try {
       const supabase = getSupabaseBrowserClient();
-      const redirectTo = `${env.NEXT_PUBLIC_APP_URL}/auth/callback`;
+      // PKCE cookies belong to the browser's current origin. Server-only env
+      // overrides are unavailable here, and build-time localhost values must
+      // never send a hosted sign-in back to the user's computer.
+      const redirectTo = `${window.location.origin}/auth/callback`;
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo },
       });
       if (oauthError) setError(oauthError.message);
     } catch {
-      setError("Sign in is not available because the app is not configured yet.");
-      if (!isSupabaseConfigured()) router.push("/setup");
+      if (!isSupabaseConfigured()) {
+        setError(
+          "Sign in is not available because the app is not configured yet.",
+        );
+        router.push("/setup");
+      } else {
+        setError(
+          "Could not start Google sign-in. Check your connection and try again.",
+        );
+      }
     } finally {
       setLoading(false);
     }

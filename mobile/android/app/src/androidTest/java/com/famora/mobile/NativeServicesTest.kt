@@ -2,6 +2,9 @@ package com.famora.mobile
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.os.ParcelFileDescriptor
+import org.junit.Before
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -22,6 +25,16 @@ import java.security.MessageDigest
 class NativeServicesTest {
   private val instrumentation = InstrumentationRegistry.getInstrumentation()
   private val context = instrumentation.targetContext
+
+  @Before fun prepareTestDevice() {
+    val device = UiDevice.getInstance(instrumentation)
+    device.wakeUp()
+    device.pressHome()
+    // Only the debuggable test APK declares LAN access, for its isolated backend.
+    if (Build.VERSION.SDK_INT >= 37) {
+      ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand("pm grant ${context.packageName} android.permission.ACCESS_LOCAL_NETWORK")).use { it.readBytes() }
+    }
+  }
 
   @Test fun pkceUsesRandomVerifierAndSha256Challenge() {
     try {

@@ -12,6 +12,8 @@ class MainApplication : Application(), ReactApplication {
   override val reactHost: ReactHost by lazy {
     getDefaultReactHost(
       context = applicationContext,
+      // Both installable variants load the embedded bundle; Metro is optional.
+      useDevSupport = false,
       packageList =
         PackageList(this).packages.apply {
           add(FamoraNativePackage())
