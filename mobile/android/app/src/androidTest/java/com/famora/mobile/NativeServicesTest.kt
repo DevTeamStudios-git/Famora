@@ -5,11 +5,14 @@ import android.content.Intent
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import org.junit.Before
+import org.junit.After
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
+import androidx.test.uiautomator.BySelector
+import androidx.test.uiautomator.StaleObjectException
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.Assume.assumeTrue
@@ -25,6 +28,24 @@ import java.security.MessageDigest
 class NativeServicesTest {
   private val instrumentation = InstrumentationRegistry.getInstrumentation()
   private val context = instrumentation.targetContext
+  @After fun captureDeviceEvidence() {
+    val device = UiDevice.getInstance(instrumentation)
+    device.takeScreenshot(File(context.getExternalFilesDir(null), "native-last.png"))
+    device.dumpWindowHierarchy(File(context.getExternalFilesDir(null), "native-hierarchy.xml"))
+  }
+  private fun clickFresh(device: UiDevice, selector: BySelector) {
+    val deadline = System.currentTimeMillis() + 15000
+    while (System.currentTimeMillis() < deadline) {
+      device.waitForIdle()
+      try {
+        val target = device.wait(Until.findObject(selector), 1000)
+        if (target != null) { target.click(); return }
+      } catch (_: StaleObjectException) {
+        // React may replace accessibility nodes while its initial data resolves.
+      }
+    }
+    fail("Native control did not become available: $selector")
+  }
 
   @Before fun prepareTestDevice() {
     val device = UiDevice.getInstance(instrumentation)
@@ -69,6 +90,7 @@ class NativeServicesTest {
     val device = UiDevice.getInstance(instrumentation)
     context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
     assertTrue("Famora should render its native sign-in screen", device.wait(Until.hasObject(By.textContains("Famora")), 45000))
+    assertTrue("Connection startup must finish with a usable sign-in control", device.wait(Until.hasObject(By.text("Continue with Google")), 25000))
     val output = File(context.getExternalFilesDir(null), "native-launch.png")
     device.takeScreenshot(output)
     assertFalse("The standalone build must not show a Metro connection error", device.hasObject(By.textContains("Unable to load script")))
@@ -84,15 +106,15 @@ class NativeServicesTest {
     val device = UiDevice.getInstance(instrumentation)
     context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
     assertTrue("Signed-in workspace should open", device.wait(Until.hasObject(By.text("More")), 45000))
-    device.findObject(By.text("More")).click()
+    clickFresh(device, By.res("tab-more"))
     assertTrue("Tasks should be available in the tools menu", device.wait(Until.hasObject(By.text("Tasks")), 10000))
-    device.findObject(By.text("Tasks")).click()
+    clickFresh(device, By.res("tool-tasks"))
     assertTrue("Task workspace should show its create control", device.wait(Until.hasObject(By.res("workspace-add")), 20000))
-    device.findObject(By.res("workspace-add")).click()
+    clickFresh(device, By.res("workspace-add"))
     assertTrue("Native editor should open immediately", device.wait(Until.hasObject(By.res("field-title")), 5000))
     val title = "Android E2E task ${System.currentTimeMillis()}"
     device.findObject(By.res("field-title")).text = title
-    device.findObject(By.res("form-save")).click()
+    clickFresh(device, By.res("form-save"))
     assertTrue("Saved task should appear in the native list", device.wait(Until.hasObject(By.text(title)), 30000))
     val session = JSONObject(data.get("session").toString())
     val accessToken = session.getString("access_token")

@@ -19,11 +19,14 @@ API validates Supabase identity and reuses the web application's permission
 checks. Native multipart uploads are limited to 4 MB to fit Vercel's request
 limit. `npm run android:apk` produces an installable, bundled APK.
 
-Verification so far: 74 web unit/component tests, 9 native unit/component tests,
-12 authenticated web workflows, 3 authenticated bearer API workflows, and
-desktop/phone visual checks passed. APK/device and final publication checks are
-tracked separately until they finish; these counts do not imply that every
-planned feature below has been implemented.
+Verification: 76 web unit/component tests, 16 live realtime/auth integration
+tests, 13 native unit/component tests, 12 authenticated web workflows, 3
+authenticated bearer API workflows, and desktop/phone visual checks passed.
+Android device checks cover encrypted credential storage, PKCE, standalone
+launch, and task creation through the native editor with API persistence.
+Both the production web callback and native callback are accepted by Supabase;
+the deployed site and its public mobile configuration endpoint respond over HTTPS.
+These checks do not imply that every planned feature below has been implemented.
 
 ## Implemented workflows
 

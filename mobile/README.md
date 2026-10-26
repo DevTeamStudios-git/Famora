@@ -40,4 +40,12 @@ node scripts/android-apk.mjs --debug --instrumentation
 npm run test:android
 ```
 
-The authenticated native flow uses the isolated E2E setup's ignored `test-results/native-session.json` fixture. Run `npm run test:android -- --authenticated` while its test server and disposable family remain available. This test creates a task through the actual native editor, verifies persistence through the authenticated API, saves `test-results/android-workspace.png`, and clears the emulator app data afterward. Credentials stay in ignored fixture files and Android's private app storage.
+Run `npm run test:android:auth` from the repository root to provision a disposable
+family, start the isolated backend on port 3100 and run the authenticated device
+flow. The local `.env` must contain the development database and Supabase fixture
+credentials. The runner refuses to reuse an occupied test port, creates a task
+through the native editor, verifies persistence through the authenticated API,
+and saves `test-results/android-workspace.png`. It then removes its test family
+and users, stops its server, and clears the emulator's app data. Credentials stay
+in ignored fixture files and Android's private app storage and are removed by
+cleanup. The signed-in family used by the published app is never used for tests.

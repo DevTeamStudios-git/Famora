@@ -32,6 +32,21 @@ class ApiError extends Error {
     super(message);
   }
 }
+async function fetchWithTimeout(url: string, options: RequestInit = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (problem) {
+    if (problem instanceof Error && problem.name === 'AbortError')
+      throw new Error(
+        'Could not reach Famora. Check your connection and try again.',
+      );
+    throw problem;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 const cache = new Map<string, unknown>();
 const watchers = new Map<string, Set<() => void>>();
 export function setCached<T>(path: string, value: T) {
@@ -153,7 +168,9 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
           userIdRef.current = null;
           clearCache();
         }
-        const response = await fetch(`${normalized}/api/mobile/config`);
+        const response = await fetchWithTimeout(
+          `${normalized}/api/mobile/config`,
+        );
         if (!response.ok)
           throw new Error(
             'This server does not have the Famora mobile API. Deploy the latest Famora version, then retry.',
@@ -264,7 +281,7 @@ export function ClientProvider({ children }: { children: React.ReactNode }) {
           const config = authConfig.current;
           if (!config)
             throw new Error('Please connect to your Famora server first.');
-          const tokenResponse = await fetch(
+          const tokenResponse = await fetchWithTimeout(
             `${config.supabaseUrl}/auth/v1/token?grant_type=pkce`,
             {
               method: 'POST',

@@ -41,6 +41,9 @@ try {
   }
   const className = 'com.famora.mobile.NativeServicesTest' + (authenticated ? '#authenticatedFixtureCanNavigateNativeWorkspace' : '');
   const result = run(['shell', 'am', 'instrument', '-w', '-r', '-e', 'class', className, 'com.famora.mobile.test/androidx.test.runner.AndroidJUnitRunner']);
+  mkdirSync(path.join(root, 'test-results'), {recursive: true});
+  run(['pull', '/sdcard/Android/data/com.famora.mobile/files/native-last.png', path.join(root, 'test-results', 'android-last.png')], {allowFailure: true});
+  run(['pull', '/sdcard/Android/data/com.famora.mobile/files/native-hierarchy.xml', path.join(root, 'test-results', 'android-hierarchy.xml')], {allowFailure: true});
   if (/FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|INSTRUMENTATION_CODE: 0|shortMsg=/.test(result) || !/OK \(\d+ tests?\)/.test(result))
     throw new Error('Android instrumentation did not pass.');
   mkdirSync(path.join(root, 'test-results'), {recursive: true});

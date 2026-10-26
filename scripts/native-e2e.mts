@@ -2,8 +2,12 @@ import { config } from "dotenv";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
-import setup from "../e2e-auth/setup";
-import teardown from "../e2e-auth/teardown";
+import { createRequire } from "node:module";
+// Playwright's fixture modules are CommonJS under this repository's package
+// settings; load their actual default exports from this ESM orchestration script.
+const loadFixture = createRequire(import.meta.url);
+const setup: () => Promise<void> = loadFixture("../e2e-auth/setup.ts").default;
+const teardown: () => Promise<void> = loadFixture("../e2e-auth/teardown.ts").default;
 
 config({ quiet: true });
 process.env.FAMORA_FAMILY_ID = randomUUID();

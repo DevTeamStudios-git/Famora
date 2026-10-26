@@ -42,9 +42,17 @@ export function WorkspaceScreen({ kind }: { kind: string }) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('ALL');
   const [editor, setEditor] = useState<WorkspaceItem | 'new' | null>(null);
+  const [draft, setDraft] = useState<{
+    values: Values;
+    files: Record<string, PickedFile>;
+  } | null>(null);
+  const [mutating, setMutating] = useState(false);
   const [history, setHistory] = useState<WorkspaceItem | null>(null);
   const c = usePalette();
   const config = data?.config || session?.modules[kind];
+  const canCreate =
+    data?.canCreate ??
+    !!(config && session?.permissions.includes(config.create));
   const items = (data?.items || []).filter(
     item =>
       `${item.title} ${item.body} ${item.detail}`
@@ -53,6 +61,8 @@ export function WorkspaceScreen({ kind }: { kind: string }) {
       (status === 'ALL' || item.values.status === status),
   );
   const save = async (values: Values, files: Record<string, PickedFile>) => {
+    setMutating(true);
+    setDraft({ values: { ...values }, files: { ...files } });
     const previous = getCached<Workspace>(path);
     const editing = editor && editor !== 'new' ? editor : null;
     const id = editing?.id || `pending-${Date.now()}`;
@@ -71,13 +81,17 @@ export function WorkspaceScreen({ kind }: { kind: string }) {
         body: toMultipart(values, files),
       });
       await refresh();
+      setDraft(null);
     } catch (problem) {
       if (previous) setCached(path, previous);
       setEditor(editing || 'new');
       notifyError(problem);
+    } finally {
+      setMutating(false);
     }
   };
   const remove = async (item: WorkspaceItem) => {
+    setMutating(true);
     const previous = getCached<Workspace>(path);
     if (previous)
       setCached(path, {
@@ -90,9 +104,12 @@ export function WorkspaceScreen({ kind }: { kind: string }) {
     } catch (problem) {
       if (previous) setCached(path, previous);
       throw problem;
+    } finally {
+      setMutating(false);
     }
   };
   const vote = async (item: WorkspaceItem, optionId: string) => {
+    setMutating(true);
     const previous = getCached<Workspace>(path);
     if (previous)
       setCached(path, {
@@ -129,6 +146,8 @@ export function WorkspaceScreen({ kind }: { kind: string }) {
     } catch (problem) {
       if (previous) setCached(path, previous);
       notifyError(problem);
+    } finally {
+      setMutating(false);
     }
   };
   return (
@@ -155,13 +174,22 @@ export function WorkspaceScreen({ kind }: { kind: string }) {
                 <Label muted>
                   {kind === 'personal'
                     ? 'Only you can see these notes.'
-                    : `${
-                        data?.items.length || 0
-                      } items in your family workspace`}
+                    : data
+                    ? `${data.items.length} ${
+                        data.items.length === 1 ? 'item' : 'items'
+                      } in your family workspace`
+                    : 'Your family workspace'}
                 </Label>
               </View>
-              {data?.canCreate ? (
-                <Button testID="workspace-add" onPress={() => setEditor('new')}>
+              {canCreate ? (
+                <Button
+                  testID="workspace-add"
+                  disabled={mutating}
+                  onPress={() => {
+                    setDraft(null);
+                    setEditor('new');
+                  }}
+                >
                   {kind === 'files' || kind === 'memories'
                     ? 'Upload'
                     : '+ Add new'}
@@ -244,7 +272,7 @@ export function WorkspaceScreen({ kind }: { kind: string }) {
               <Button
                 key={option.id}
                 secondary={!option.mine}
-                disabled={item.body === 'Voting closed'}
+                disabled={mutating || item.body === 'Voting closed'}
                 onPress={() => {
                   void vote(item, option.id);
                 }}
@@ -260,7 +288,14 @@ export function WorkspaceScreen({ kind }: { kind: string }) {
                 </Button>
               ) : null}
               {data?.canEdit && item.canEdit !== false && !item.pending ? (
-                <Button quiet onPress={() => setEditor(item)}>
+                <Button
+                  quiet
+                  disabled={mutating}
+                  onPress={() => {
+                    setDraft(null);
+                    setEditor(item);
+                  }}
+                >
                   Edit
                 </Button>
               ) : null}
@@ -268,6 +303,7 @@ export function WorkspaceScreen({ kind }: { kind: string }) {
                 <Button
                   quiet
                   danger
+                  disabled={mutating}
                   onPress={() => confirmDelete(item.title, () => remove(item))}
                 >
                   Delete
@@ -286,7 +322,8 @@ export function WorkspaceScreen({ kind }: { kind: string }) {
               : 'Edit item'
           }
           fields={config.fields}
-          values={editor === 'new' ? {} : editor.values}
+          values={draft?.values ?? (editor === 'new' ? {} : editor.values)}
+          initialFiles={draft?.files}
           members={data?.members}
           editing={editor !== 'new'}
           onClose={() => setEditor(null)}

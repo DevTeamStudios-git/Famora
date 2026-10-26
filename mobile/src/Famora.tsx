@@ -158,6 +158,7 @@ export default function Famora() {
               {Object.entries(session?.modules || {}).map(([kind, tool]) => (
                 <Row
                   key={kind}
+                  testID={`tool-${kind}`}
                   title={tool.title}
                   body={
                     kind === 'personal'

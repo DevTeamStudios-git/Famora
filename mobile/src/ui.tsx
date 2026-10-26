@@ -36,6 +36,9 @@ const light = {
   input: '#f3f6fb',
   danger: '#b3261e',
   success: '#146c2e',
+  fontScale: 1,
+  reducedMotion: false,
+  compact: false,
 };
 const dark = {
   background: '#111318',
@@ -49,6 +52,9 @@ const dark = {
   input: '#282a2c',
   danger: '#ffb4ab',
   success: '#b5e8bb',
+  fontScale: 1,
+  reducedMotion: false,
+  compact: false,
 };
 type Palette = typeof light;
 const ThemeContext = createContext<Palette>(light);
@@ -56,13 +62,23 @@ export function AppTheme({ children }: { children: React.ReactNode }) {
   const { session } = useClient();
   const scheme = useColorScheme();
   const mode = session?.preferences.appearance?.theme;
+  const base =
+    mode === 'dark' || (mode !== 'light' && scheme === 'dark') ? dark : light;
+  const accessibility = session?.preferences.accessibility;
   return (
     <ThemeContext.Provider
-      value={
-        mode === 'dark' || (mode !== 'light' && scheme === 'dark')
-          ? dark
-          : light
-      }
+      value={{
+        ...base,
+        fontScale: accessibility?.largerText === true ? 1.15 : 1,
+        reducedMotion: accessibility?.reducedMotion === true,
+        compact: session?.preferences.appearance?.density === 'compact',
+        line:
+          accessibility?.highContrast === true
+            ? base === dark
+              ? '#c4c7c5'
+              : '#5f6368'
+            : base.line,
+      }}
     >
       {children}
     </ThemeContext.Provider>
@@ -86,8 +102,8 @@ export function Label({
       style={[
         {
           color: muted ? c.muted : c.text,
-          fontSize: large ? 24 : 15,
-          lineHeight: large ? 31 : 23,
+          fontSize: (large ? 24 : 15) * c.fontScale,
+          lineHeight: (large ? 31 : 23) * c.fontScale,
         },
         style,
       ]}
@@ -152,7 +168,7 @@ export function Button({
             : secondary
             ? c.primary
             : c.onPrimary,
-          fontSize: 14,
+          fontSize: 14 * c.fontScale,
           fontWeight: '600',
         }}
       >
@@ -175,7 +191,7 @@ export function Card({
         {
           backgroundColor: c.surface,
           borderRadius: 22,
-          padding: 18,
+          padding: c.compact ? 14 : 18,
           gap: 11,
           borderWidth: 1,
           borderColor: c.line,
@@ -233,7 +249,7 @@ export function Input({
           borderRadius: 14,
           paddingHorizontal: 14,
           paddingVertical: 12,
-          fontSize: 16,
+          fontSize: 16 * c.fontScale,
           minHeight: 48,
           textAlignVertical: multiline ? 'top' : 'center',
           ...(multiline ? { minHeight: 125 } : null),
@@ -306,7 +322,10 @@ export function Sheet({
 }) {
   const c = usePalette();
   return (
-    <Modal animationType="slide" onRequestClose={onClose}>
+    <Modal
+      animationType={c.reducedMotion ? 'none' : 'slide'}
+      onRequestClose={onClose}
+    >
       <SafeAreaView style={{ flex: 1, backgroundColor: c.surface }}>
         <View
           style={[
@@ -373,20 +392,24 @@ export function Row({
   body,
   onPress,
   trailing,
+  testID,
 }: {
   title: string;
   body?: string;
   onPress?: () => void;
   trailing?: React.ReactNode;
+  testID?: string;
 }) {
   const c = usePalette();
   return (
     <Pressable
+      testID={testID}
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={onPress ? title : undefined}
       onPress={onPress}
       style={({ pressed }) => ({
-        paddingVertical: 14,
+        paddingVertical: c.compact ? 10 : 14,
+        minHeight: 46,
         paddingHorizontal: 4,
         flexDirection: 'row',
         alignItems: 'center',
@@ -442,7 +465,7 @@ export function Choice({
       <Modal
         visible={open}
         transparent
-        animationType="fade"
+        animationType={c.reducedMotion ? 'none' : 'fade'}
         onRequestClose={() => setOpen(false)}
       >
         <Pressable
@@ -522,6 +545,7 @@ export function FormModal({
   title,
   fields,
   values = {},
+  initialFiles = {},
   members = [],
   editing = false,
   submit = 'Save',
@@ -531,6 +555,7 @@ export function FormModal({
   title: string;
   fields: Field[];
   values?: Values;
+  initialFiles?: Record<string, PickedFile>;
   members?: { id: string; name: string }[];
   editing?: boolean;
   submit?: string;
@@ -541,7 +566,7 @@ export function FormModal({
     ...values,
     ...initialValues(fields, values),
   }));
-  const [files, setFiles] = useState<Record<string, PickedFile>>({});
+  const [files, setFiles] = useState<Record<string, PickedFile>>(initialFiles);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const c = usePalette();
@@ -565,7 +590,7 @@ export function FormModal({
   };
   return (
     <Modal
-      animationType="slide"
+      animationType={c.reducedMotion ? 'none' : 'slide'}
       onRequestClose={() => {
         if (!busy) onClose();
       }}
