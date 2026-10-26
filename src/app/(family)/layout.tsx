@@ -4,6 +4,8 @@ import { getFamilyWithFeatures } from "@/server/queries/family";
 import { isSupabaseConfigured } from "@/lib/env";
 import { DISPLAY_ROLE_LABELS, getDisplayRole } from "@/lib/authorization/roles";
 import { AppShell } from "@/components/layout/app-shell";
+import { prisma } from "@/lib/prisma/client";
+import { PreferencesEffects } from "@/components/core/preferences-effects";
 
 export default async function FamilyLayout({
   children,
@@ -25,7 +27,13 @@ export default async function FamilyLayout({
   }
 
   const { user, membership } = access;
-  const family = await getFamilyWithFeatures(membership.familyId);
+  const [profile, family] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: user.id },
+      include: { settings: true },
+    }),
+    getFamilyWithFeatures(membership.familyId),
+  ]);
   if (!family) {
     redirect("/access-denied");
   }
@@ -39,12 +47,13 @@ export default async function FamilyLayout({
   return (
     <AppShell
       user={{
-        name: user.user_metadata?.name ?? user.email ?? "Family member",
+        name: profile?.displayName ?? user.email ?? "Family member",
         email: user.email ?? "",
         avatarUrl:
-          typeof user.user_metadata?.avatar_url === "string"
+          profile?.avatarUrl ??
+          (typeof user.user_metadata?.avatar_url === "string"
             ? user.user_metadata.avatar_url
-            : null,
+            : null),
         displayRoleLabel:
           DISPLAY_ROLE_LABELS[getDisplayRole(membership.internalRole)],
       }}
@@ -52,6 +61,16 @@ export default async function FamilyLayout({
       isAdmin={isAdmin}
       enabledFeatures={[...family.features]}
     >
+      <PreferencesEffects
+        theme={profile?.settings?.theme ?? "system"}
+        density={profile?.settings?.density ?? "comfortable"}
+        accessibility={
+          (profile?.settings?.accessibilityJson ?? {}) as Record<
+            string,
+            unknown
+          >
+        }
+      />
       {children}
     </AppShell>
   );

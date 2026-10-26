@@ -13,11 +13,17 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
+    "test:e2e:auth": "playwright test --config playwright.auth.config.ts",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
+    "db:verify-migrations": "node scripts/verify-migrations.mjs",
     "db:seed": "prisma db seed",
     "db:migrate": "prisma migrate dev",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "android:apk": "node scripts/android-apk.mjs",
+    "android:apk:debug": "node scripts/android-apk.mjs --debug",
+    "test:android": "node scripts/android-test.mjs",
+    "test:android:auth": "tsx scripts/native-e2e.mts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

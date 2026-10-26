@@ -22,20 +22,19 @@ export function SidebarNavItem({
   const pathname = usePathname();
   const Icon = item.icon;
   const active =
-    item.href === "/"
-      ? pathname === "/"
-      : pathname.startsWith(item.href);
+    item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
 
   return (
     <Link
       href={item.href}
       onClick={onNavigate}
+      aria-label={collapsed ? item.title : undefined}
+      title={collapsed ? item.title : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-        "before:absolute before:left-0 before:top-1/2 before:h-5 before:w-1 before:-translate-y-1/2 before:rounded-full before:bg-transparent before:content-['']",
+        "group relative flex min-h-11 items-center gap-3 rounded-full px-5 py-2.5 text-sm font-medium transition-colors",
         active
-          ? "bg-sidebar-accent text-sidebar-accent-foreground before:bg-primary"
+          ? "bg-sidebar-accent text-sidebar-accent-foreground"
           : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
         collapsed && "justify-center px-0",
       )}

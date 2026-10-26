@@ -9,11 +9,19 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function AttachmentList({ attachments }: { attachments: ChatAttachment[] }) {
+export function AttachmentList({
+  attachments = [],
+}: {
+  attachments?: ChatAttachment[];
+}) {
   if (attachments.length === 0) return null;
 
-  const media = attachments.filter((a) => a.category === "IMAGE" || a.category === "VIDEO");
-  const files = attachments.filter((a) => a.category !== "IMAGE" && a.category !== "VIDEO");
+  const media = attachments.filter(
+    (a) => a.category === "IMAGE" || a.category === "VIDEO",
+  );
+  const files = attachments.filter(
+    (a) => a.category !== "IMAGE" && a.category !== "VIDEO",
+  );
 
   return (
     <div className="mt-1 space-y-1.5">
@@ -36,7 +44,11 @@ export function AttachmentList({ attachments }: { attachments: ChatAttachment[] 
                 className="block aspect-square overflow-hidden rounded-lg bg-muted"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- signed, expiring Supabase Storage URL, not a static asset */}
-                <img src={a.url} alt={a.caption ?? a.fileName} className="h-full w-full object-cover" />
+                <img
+                  src={a.url}
+                  alt={a.caption ?? a.fileName}
+                  className="h-full w-full object-cover"
+                />
               </a>
             ) : (
               <video
@@ -58,12 +70,22 @@ export function AttachmentList({ attachments }: { attachments: ChatAttachment[] 
           rel="noreferrer"
           className="flex max-w-xs items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2 hover:bg-muted"
         >
-          <FileText className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+          <FileText
+            className="h-5 w-5 shrink-0 text-muted-foreground"
+            aria-hidden
+          />
           <div className="min-w-0 flex-1">
             <p className="truncate text-xs font-medium">{a.fileName}</p>
-            <p className="text-[11px] text-muted-foreground">{formatSize(a.size)}</p>
+            <p className="text-[11px] text-muted-foreground">
+              {formatSize(a.size)}
+            </p>
           </div>
-          {a.url ? <Download className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden /> : null}
+          {a.url ? (
+            <Download
+              className="h-4 w-4 shrink-0 text-muted-foreground"
+              aria-hidden
+            />
+          ) : null}
         </a>
       ))}
 

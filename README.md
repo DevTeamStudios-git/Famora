@@ -5,7 +5,7 @@ contacts, recipes, memories, announcements and more — for one family and the
 people they approve. Famora runs on Next.js (App Router), Supabase (Auth,
 Realtime, Storage, RLS) and Prisma (type-safe Postgres access).
 
-> **Security posture:** Famora is *whitelist-only*. Nobody can create a
+> **Security posture:** Famora is _whitelist-only_. Nobody can create a
 > family or see anything without being on the family access whitelist. The
 > Hidden Admin role is completely invisible to every other member — even in
 > raw database reads (RLS).
@@ -46,13 +46,16 @@ psql "$DIRECT_URL" -f supabase/seed.sql
 
 ## Scripts
 
-| script | purpose |
-| --- | --- |
-| `pnpm dev` / `pnpm build` / `pnpm start` | Next.js lifecycle |
-| `pnpm lint` | ESLint |
-| `pnpm typecheck` | `tsc --noEmit` |
-| `pnpm test` / `pnpm test:e2e` | Vitest unit + Playwright smoke |
-| `pnpm db:generate` / `db:validate` / `db:migrate` / `db:seed` | Prisma workflow |
+| script                                                        | purpose                                                     |
+| ------------------------------------------------------------- | ----------------------------------------------------------- |
+| `pnpm dev` / `pnpm build` / `pnpm start`                      | Next.js lifecycle                                           |
+| `pnpm lint`                                                   | ESLint                                                      |
+| `pnpm typecheck`                                              | `tsc --noEmit`                                              |
+| `pnpm test` / `pnpm test:e2e`                                 | Vitest unit + Playwright smoke                              |
+| `pnpm test:e2e:auth`                                          | Real authenticated feature workflows in a disposable family |
+| `pnpm test:integration`                                       | Live Supabase Realtime and RLS checks                       |
+| `pnpm db:verify-migrations`                                   | Replay all Prisma migrations in a rolled-back schema        |
+| `pnpm db:generate` / `db:validate` / `db:migrate` / `db:seed` | Prisma workflow                                             |
 
 ## Security model
 
@@ -65,8 +68,8 @@ application code: the whitelist lives in the database
 1. **Application layer** — `src/lib/authorization/*`, checked in layouts,
    pages and every server action.
 2. **Database floor (RLS)** — `supabase/migrations/0001_enable_rls.sql`
-   provides least-privilege policies keyed on *active membership in the same
-   family* plus role gates for sensitive tables.
+   provides least-privilege policies keyed on _active membership in the same
+   family_ plus role gates for sensitive tables.
 
 ### Roles
 
@@ -93,22 +96,25 @@ application code: the whitelist lives in the database
 
 The initial family seed (Supabase `seed.sql` / `prisma/seed.ts`):
 
-| email | role |
-| --- | --- |
-| akouekam@gmail.com | Family Chief |
-| alibizza85@gmail.com | Family Chief |
-| edithyot@gmail.com | Co-Family Chief |
-| chainesecondairegabriel@gmail.com | Hidden Admin |
-| gabethan1316@gmail.com | Hidden Admin |
-| estherpriscilekm@gmail.com | Member |
-| gaya74222@gmail.com | Member |
-| michaelkm1406@gmail.com | Member |
-| michesther6@gmail.com | Member |
+| email                             | role            |
+| --------------------------------- | --------------- |
+| akouekam@gmail.com                | Family Chief    |
+| alibizza85@gmail.com              | Family Chief    |
+| edithyot@gmail.com                | Co-Family Chief |
+| chainesecondairegabriel@gmail.com | Hidden Admin    |
+| gabethan1316@gmail.com            | Hidden Admin    |
+| estherpriscilekm@gmail.com        | Member          |
+| gaya74222@gmail.com               | Member          |
+| michaelkm1406@gmail.com           | Member          |
+| michesther6@gmail.com             | Member          |
 
 First sign-in flow: Google OAuth → `ensureMembership` checks `family_whitelist`,
 and only approved emails are provisioned a `User` + `FamilyMember` row.
 
 ## Repository layout
+
+Implemented workflows, verification and remaining release requirements are
+documented in [docs/feature-status.md](docs/feature-status.md).
 
 ```
 prisma/schema.prisma       # domain model (canonical with /supabase)
@@ -135,6 +141,27 @@ src/
 See `.env.example`. Public values are prefixed `NEXT_PUBLIC_`; secrets
 (supabase service role key, DB connections) are server-only and never imported
 from a client component (`src/lib/env.ts`).
+
+On Vercel, set `FAMORA_APP_URL` to the production HTTPS origin. This server-side
+canonical URL takes precedence over the legacy `NEXT_PUBLIC_APP_URL` for Google
+OAuth callbacks, including native PKCE sign-in. Allow the production
+`/auth/callback` URL in Supabase Authentication's redirect configuration.
+
+## Native Android app
+
+The `mobile/` project uses the React Native community CLI, native Android views,
+Android Keystore session storage, document picking and voice recording. It uses
+the same family authorization and persisted backend as the web app.
+
+```sh
+npm run android:apk
+```
+
+The standalone APK is written to `artifacts/Famora.apk`; Metro is not required
+to open it. Android Studio's SDK and Java runtime must be installed. See
+[mobile/README.md](mobile/README.md) for prerequisites, server configuration,
+device tests and release signing. The default APK uses a development signing
+key and is suitable for installation/testing, not Play Store distribution.
 
 ## Testing & CI
 

@@ -1,7 +1,4 @@
-import { FeaturePlaceholder } from "@/components/core/feature-placeholder";
-import type { Metadata } from "next";
-export const metadata: Metadata = { title: "Notifications" };
-
+import { AdminPage } from "@/components/core/admin-page";
 export default function Page() {
-  return <FeaturePlaceholder title="Notifications" description="Family-wide notification configuration." note="Administrative controls are being wired here with server-side permission checks." />;
+  return <AdminPage section="notifications" />;
 }

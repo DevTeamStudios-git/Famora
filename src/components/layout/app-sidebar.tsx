@@ -2,13 +2,19 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Plus, Search, ShieldCheck } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Search,
+  ShieldCheck,
+} from "lucide-react";
 import { mainNavItems, toolsNavItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarNavItem } from "@/components/layout/sidebar-nav-item";
-import { UserMenu, type ShellUser } from "@/components/layout/user-menu";
+import type { ShellUser } from "@/components/layout/user-menu";
 
 type AppSidebarProps = {
   user: ShellUser;
@@ -61,22 +67,27 @@ export function AppSidebar({
   return (
     <aside
       className={cn(
-        "sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-sidebar-border bg-sidebar lg:flex",
-        collapsed ? "w-16" : "w-64",
+        "sticky top-0 hidden h-dvh shrink-0 flex-col bg-sidebar py-3 lg:flex",
+        collapsed ? "w-20" : "w-[260px]",
       )}
     >
       {/* Top: identity + family */}
-      <div className={cn("flex flex-col gap-4 p-4", collapsed && "p-3")}>
-        <div className={cn("flex items-center gap-2", collapsed && "justify-center")}>
+      <div className={cn("flex flex-col gap-6 px-6 py-4", collapsed && "px-4")}>
+        <div
+          className={cn(
+            "flex items-center gap-2",
+            collapsed && "justify-center",
+          )}
+        >
           <Link
             href="/"
             className="flex items-center gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
+            <span className="famora-mark flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-xl font-semibold text-primary-foreground">
               F
             </span>
             {!collapsed ? (
-              <span className="text-lg font-semibold tracking-tight">
+              <span className="text-xl font-medium tracking-tight">
                 {familyName}
               </span>
             ) : null}
@@ -115,7 +126,7 @@ export function AppSidebar({
           <SidebarNavItem
             key={item.href}
             item={item}
-            badgeCount={item.badgeKey ? badges[item.badgeKey] ?? 0 : 0}
+            badgeCount={item.badgeKey ? (badges[item.badgeKey] ?? 0) : 0}
             collapsed={collapsed}
           />
         ))}
@@ -126,11 +137,7 @@ export function AppSidebar({
           </div>
         ) : null}
         {visibleTools.map((item) => (
-          <SidebarNavItem
-            key={item.href}
-            item={item}
-            collapsed={collapsed}
-          />
+          <SidebarNavItem key={item.href} item={item} collapsed={collapsed} />
         ))}
         {isAdmin ? (
           <>
@@ -144,7 +151,7 @@ export function AppSidebar({
       </nav>
 
       {/* Bottom: quick action + user */}
-      <div className="border-t border-sidebar-border p-3">
+      <div className="p-4" aria-label={`Signed in as ${user.name}`}>
         <div className={cn("flex items-center gap-2", collapsed && "flex-col")}>
           <Button
             size={collapsed ? "icon" : "default"}
@@ -156,7 +163,6 @@ export function AppSidebar({
             <Plus className="h-4 w-4" aria-hidden />
             {!collapsed ? "Create" : null}
           </Button>
-          <UserMenu user={user} />
           <Button
             variant="ghost"
             size="icon"

@@ -1,8 +1,9 @@
 "use client";
-
-import * as React from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { Bell, Menu, Search } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { useTheme } from "next-themes";
+import { Bell, Menu, Search, Sun, Moon, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -13,96 +14,124 @@ import {
 } from "@/components/ui/sheet";
 import { SidebarNavItem } from "@/components/layout/sidebar-nav-item";
 import { UserMenu, type ShellUser } from "@/components/layout/user-menu";
-import { mainNavItems, toolsNavItems } from "@/lib/navigation";
-
-type TopbarProps = {
-  user: ShellUser;
-  familyName: string;
-  isAdmin: boolean;
-  enabledFeatures: string[];
-};
-
+import { mainNavItems, toolsNavItems, systemNavItems } from "@/lib/navigation";
+const subscribeHydration = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
 export function Topbar({
   user,
   familyName,
   isAdmin,
   enabledFeatures,
-}: TopbarProps) {
-  const [open, setOpen] = React.useState(false);
-
-  const visibleMain = mainNavItems.filter(
+}: {
+  user: ShellUser;
+  familyName: string;
+  isAdmin: boolean;
+  enabledFeatures: string[];
+}) {
+  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const { resolvedTheme, setTheme } = useTheme();
+  const hydrated = useSyncExternalStore(
+    subscribeHydration,
+    clientReady,
+    serverReady,
+  );
+  const items = [...mainNavItems, ...toolsNavItems, ...systemNavItems].filter(
     (item) => !item.featureKey || enabledFeatures.includes(item.featureKey),
   );
-  const visibleTools = toolsNavItems.filter(
-    (item) => !item.featureKey || enabledFeatures.includes(item.featureKey),
-  );
-
+  const title =
+    items
+      .filter((item) =>
+        item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
+      )
+      .sort((a, b) => b.href.length - a.href.length)[0]?.title ??
+    "Family workspace";
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-border bg-background/90 px-4 backdrop-blur lg:hidden">
+    <header className="app-topbar sticky top-0 z-30 flex h-[72px] items-center gap-3 px-4 sm:px-6 lg:px-8">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label="Open navigation">
-            <Menu className="h-5 w-5" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            aria-label="Open navigation"
+          >
+            <Menu />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="w-72 p-0">
-          <SheetHeader className="p-4">
-            <SheetTitle>Famora</SheetTitle>
+        <SheetContent side="left" className="w-80 overflow-y-auto p-4">
+          <SheetHeader>
+            <SheetTitle>{familyName}</SheetTitle>
           </SheetHeader>
-          <div className="px-3">
-            <Button
-              variant="outline"
-              className="w-full justify-start gap-2 text-muted-foreground"
-              onClick={() => {
-                setOpen(false);
-                document.dispatchEvent(new CustomEvent("famora:open-search"));
-              }}
-            >
-              <Search className="h-4 w-4" aria-hidden />
-              Search
-            </Button>
-          </div>
-          <div className="mt-4 space-y-1 px-3">
-            {visibleMain.map((item) => (
-              <SidebarNavItem key={item.href} item={item} onNavigate={() => setOpen(false)} />
-            ))}
-            <div className="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Tools
-            </div>
-            {visibleTools.map((item) => (
-              <SidebarNavItem key={item.href} item={item} onNavigate={() => setOpen(false)} />
-            ))}
-            {isAdmin ? (
+          <nav className="mt-6 space-y-1" aria-label="Mobile navigation">
+            {items.map((item) => (
               <SidebarNavItem
-                item={{ title: "Admin Panel", href: "/admin", icon: Bell }}
+                key={item.href}
+                item={item}
                 onNavigate={() => setOpen(false)}
               />
-            ) : null}
-          </div>
+            ))}
+            {isAdmin && (
+              <SidebarNavItem
+                item={{
+                  title: "Admin Panel",
+                  href: "/admin",
+                  icon: ShieldCheck,
+                }}
+                onNavigate={() => setOpen(false)}
+              />
+            )}
+          </nav>
         </SheetContent>
       </Sheet>
-
-      <Link href="/" className="flex min-w-0 items-center gap-2">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">
-          F
+      <div className="min-w-0 lg:hidden">
+        <span className="block truncate font-semibold tracking-tight">
+          {familyName}
         </span>
-        <span className="truncate text-base font-semibold">{familyName}</span>
+        <p className="truncate text-xs text-muted-foreground">{title}</p>
+      </div>
+      <div className="hidden min-w-40 text-lg font-medium lg:block">
+        {title}
+      </div>
+      <Link
+        href="/search"
+        className="ml-2 hidden h-12 min-w-0 flex-1 items-center gap-3 rounded-full bg-secondary/80 px-5 text-sm text-muted-foreground sm:flex"
+      >
+        <Search className="h-5 w-5 shrink-0" />
+        <span className="truncate">Search your family workspace</span>
+        <kbd className="ml-auto hidden shrink-0 text-xs opacity-60 xl:block">
+          Ctrl K
+        </kbd>
       </Link>
-
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex items-center gap-1 sm:gap-2">
         <Button
           variant="ghost"
           size="icon"
+          className="sm:hidden"
+          asChild
           aria-label="Search"
-          onClick={() => document.dispatchEvent(new CustomEvent("famora:open-search"))}
         >
-          <Search className="h-5 w-5" />
+          <Link href="/search">
+            <Search />
+          </Link>
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Toggle color theme"
+          disabled={!hydrated}
+          onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+        >
+          <Sun className="hidden dark:block" />
+          <Moon className="dark:hidden" />
         </Button>
         <Button variant="ghost" size="icon" asChild aria-label="Notifications">
           <Link href="/notifications">
-            <Bell className="h-5 w-5" />
+            <Bell />
           </Link>
         </Button>
+        <span className="mx-1 h-6 w-px bg-border" />
         <UserMenu user={user} />
       </div>
     </header>

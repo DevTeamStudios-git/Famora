@@ -1,0 +1,105 @@
+package com.famora.mobile
+
+import android.content.Context
+import android.content.Intent
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
+import org.junit.Assert.*
+import org.junit.Test
+import org.junit.Assume.assumeTrue
+import org.junit.runner.RunWith
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import org.json.JSONObject
+import android.util.Base64
+import java.security.MessageDigest
+
+@RunWith(AndroidJUnit4::class)
+class NativeServicesTest {
+  private val instrumentation = InstrumentationRegistry.getInstrumentation()
+  private val context = instrumentation.targetContext
+
+  @Test fun pkceUsesRandomVerifierAndSha256Challenge() {
+    try {
+      val (verifier, challenge) = FamoraNativeModule.createPKCEPair(context)
+      assertEquals(43, verifier.length)
+      assertEquals(43, challenge.length)
+      val expected = Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+      assertEquals(expected, challenge)
+      assertEquals(verifier, FamoraNativeModule.readSecure(context, "famora.pkce"))
+      assertNotEquals("Sign-in attempts must not reuse their verifier", verifier, FamoraNativeModule.createPKCEPair(context).first)
+    } finally { context.getSharedPreferences("famora.encrypted", Context.MODE_PRIVATE).edit().remove("famora.pkce").commit() }
+  }
+
+  @Test fun credentialsAreEncryptedWithFreshNonces() {
+    val preferences = context.getSharedPreferences("famora.encrypted", Context.MODE_PRIVATE)
+    val key = "instrumentation.secure-roundtrip"
+    val plaintext = "test-token-${System.nanoTime()}"
+    try {
+      FamoraNativeModule.writeSecure(context, key, plaintext)
+      val firstCiphertext = preferences.getString(key, null)
+      assertEquals(plaintext, FamoraNativeModule.readSecure(context, key))
+      assertFalse(firstCiphertext!!.contains(plaintext))
+      FamoraNativeModule.writeSecure(context, key, plaintext)
+      val secondCiphertext = preferences.getString(key, null)
+      assertNotEquals("Each write must use a fresh GCM nonce", firstCiphertext, secondCiphertext)
+      assertEquals(plaintext, FamoraNativeModule.readSecure(context, key))
+      assertNull(FamoraNativeModule.readSecure(context, "$key-missing"))
+    } finally { preferences.edit().remove(key).commit() }
+  }
+
+  @Test fun launchesStandaloneWithoutMetro() {
+    val device = UiDevice.getInstance(instrumentation)
+    context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+    assertTrue("Famora should render its native sign-in screen", device.wait(Until.hasObject(By.textContains("Famora")), 45000))
+    val output = File(context.getExternalFilesDir(null), "native-launch.png")
+    device.takeScreenshot(output)
+    assertFalse("The standalone build must not show a Metro connection error", device.hasObject(By.textContains("Unable to load script")))
+  }
+
+  /** Fixture provisioned by the E2E runner; never compiled into the production app. */
+  @Test fun authenticatedFixtureCanNavigateNativeWorkspace() {
+    val fixture = File(context.filesDir, "native-session.json")
+    assumeTrue("Authenticated test requires a disposable E2E session fixture", fixture.exists())
+    val data = JSONObject(fixture.readText())
+    FamoraNativeModule.writeSecure(context, data.getString("storageKey"), data.get("session").toString())
+    FamoraNativeModule.writeSecure(context, "famora.apiBase", data.getString("apiBase"))
+    val device = UiDevice.getInstance(instrumentation)
+    context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+    assertTrue("Signed-in workspace should open", device.wait(Until.hasObject(By.text("More")), 45000))
+    device.findObject(By.text("More")).click()
+    assertTrue("Tasks should be available in the tools menu", device.wait(Until.hasObject(By.text("Tasks")), 10000))
+    device.findObject(By.text("Tasks")).click()
+    assertTrue("Task workspace should show its create control", device.wait(Until.hasObject(By.res("workspace-add")), 20000))
+    device.findObject(By.res("workspace-add")).click()
+    assertTrue("Native editor should open immediately", device.wait(Until.hasObject(By.res("field-title")), 5000))
+    val title = "Android E2E task ${System.currentTimeMillis()}"
+    device.findObject(By.res("field-title")).text = title
+    device.findObject(By.res("form-save")).click()
+    assertTrue("Saved task should appear in the native list", device.wait(Until.hasObject(By.text(title)), 30000))
+    val session = JSONObject(data.get("session").toString())
+    val accessToken = session.getString("access_token")
+    var persistedId: String? = null
+    val deadline = System.currentTimeMillis() + 30000
+    while (persistedId == null && System.currentTimeMillis() < deadline) {
+      val connection = URL(data.getString("apiBase") + "/api/mobile/workspace/tasks").openConnection() as HttpURLConnection
+      try {
+        connection.connectTimeout = 10000; connection.readTimeout = 10000
+        connection.setRequestProperty("Authorization", "Bearer $accessToken")
+        val payload = JSONObject(connection.inputStream.bufferedReader().readText()).getJSONArray("items")
+        for (index in 0 until payload.length()) {
+          val item = payload.getJSONObject(index)
+          if (item.getString("title") == title) { persistedId = item.getString("id"); break }
+        }
+      } finally { connection.disconnect() }
+      if (persistedId == null) Thread.sleep(400)
+    }
+    assertNotNull("Task created through the native UI must persist through the authenticated API", persistedId)
+    val output = File(context.getExternalFilesDir(null), "native-workspace.png")
+    device.takeScreenshot(output)
+  }
+}

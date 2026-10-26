@@ -1,9 +1,18 @@
 "use client";
 
 import * as React from "react";
-import { WifiOff, MessageSquare, Pin, PinOff, ChevronRight } from "lucide-react";
+import {
+  WifiOff,
+  MessageSquare,
+  Pin,
+  PinOff,
+  ChevronRight,
+} from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
-import { REALTIME_CHANNELS, REALTIME_POSTGRES_TABLES } from "@/lib/realtime/channels";
+import {
+  REALTIME_CHANNELS,
+  REALTIME_POSTGRES_TABLES,
+} from "@/lib/realtime/channels";
 import type { TypingPayload } from "@/lib/realtime/channels";
 import { EmptyState } from "@/components/core/empty-state";
 import { MessageItem } from "@/components/chat/message-item";
@@ -25,6 +34,8 @@ import type { ComposerSendPayload } from "@/components/chat/message-composer";
 import { toast } from "sonner";
 
 type ChatRoomProps = {
+  enterToSend?: boolean;
+  shareTyping?: boolean;
   familyId: string;
   conversationId: string;
   viewer: { memberId: string; displayName: string };
@@ -42,13 +53,16 @@ const TYPING_EXPIRY_MS = 7000;
 const TYPING_HEARTBEAT_MS = 3000;
 
 export function ChatRoom({
+  enterToSend = true,
+  shareTyping = true,
   familyId,
   conversationId,
   viewer,
   initialMessages,
   permissions,
 }: ChatRoomProps) {
-  const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
+  const [messages, setMessages] =
+    React.useState<ChatMessage[]>(initialMessages);
   const [replyingTo, setReplyingTo] = React.useState<ChatMessage | null>(null);
   const [connected, setConnected] = React.useState(true);
   const [typers, setTypers] = React.useState<Record<string, string>>({});
@@ -57,9 +71,9 @@ export function ChatRoom({
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const isNearBottomRef = React.useRef(true);
   const messagesRef = React.useRef<ChatMessage[]>(initialMessages);
-  const channelRef = React.useRef<ReturnType<ReturnType<typeof getSupabaseBrowserClient>["channel"]> | null>(
-    null,
-  );
+  const channelRef = React.useRef<ReturnType<
+    ReturnType<typeof getSupabaseBrowserClient>["channel"]
+  > | null>(null);
   const typingTimersRef = React.useRef(new Map<string, number>());
   const typingHeartbeatRef = React.useRef<number | null>(null);
   const amTypingRef = React.useRef(false);
@@ -81,7 +95,10 @@ export function ChatRoom({
   function upsertMessage(next: ChatMessage) {
     setMessages((prev) => {
       const idx = prev.findIndex((m) => m.id === next.id);
-      if (idx === -1) return [...prev, next].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      if (idx === -1)
+        return [...prev, next].sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt),
+        );
       const copy = [...prev];
       copy[idx] = next;
       return copy;
@@ -108,7 +125,11 @@ export function ChatRoom({
       });
     }, TYPING_EXPIRY_MS);
     typingTimersRef.current.set(memberId, timer);
-    setTypers((prev) => (prev[memberId] === displayName ? prev : { ...prev, [memberId]: displayName }));
+    setTypers((prev) =>
+      prev[memberId] === displayName
+        ? prev
+        : { ...prev, [memberId]: displayName },
+    );
   }
 
   function clearTyping(memberId: string) {
@@ -127,6 +148,7 @@ export function ChatRoom({
 
   const sendTyping = React.useCallback(
     (isTyping: boolean) => {
+      if (!shareTyping) return;
       const payload: TypingPayload = {
         conversationId,
         memberId: viewer.memberId,
@@ -135,7 +157,7 @@ export function ChatRoom({
       };
       channelRef.current?.send({ type: "broadcast", event: "typing", payload });
     },
-    [conversationId, viewer.memberId, viewer.displayName],
+    [conversationId, viewer.memberId, viewer.displayName, shareTyping],
   );
 
   // Re-broadcast "typing" on a heartbeat so the banner never lapses while the
@@ -178,8 +200,9 @@ export function ChatRoom({
   // it is still on screen so reactions/pins update without a manual refresh.
   React.useEffect(() => {
     let active = true;
-    let channel: ReturnType<ReturnType<typeof getSupabaseBrowserClient>["channel"]> | null =
-      null;
+    let channel: ReturnType<
+      ReturnType<typeof getSupabaseBrowserClient>["channel"]
+    > | null = null;
 
     function refetchIfVisible(messageId: string | undefined) {
       if (!messageId || !active) return;
@@ -253,7 +276,10 @@ export function ChatRoom({
             schema: "public",
             table: REALTIME_POSTGRES_TABLES.messageReactions,
           },
-          (payload: { new?: { id?: string; messageId?: string }; old?: { id?: string; messageId?: string } }) => {
+          (payload: {
+            new?: { id?: string; messageId?: string };
+            old?: { id?: string; messageId?: string };
+          }) => {
             refreshFromSideEffect(payload);
           },
         )
@@ -264,7 +290,10 @@ export function ChatRoom({
             schema: "public",
             table: REALTIME_POSTGRES_TABLES.pinnedMessages,
           },
-          (payload: { new?: { id?: string; messageId?: string }; old?: { id?: string; messageId?: string } }) => {
+          (payload: {
+            new?: { id?: string; messageId?: string };
+            old?: { id?: string; messageId?: string };
+          }) => {
             refreshFromSideEffect(payload);
           },
         )
@@ -410,7 +439,10 @@ export function ChatRoom({
               Pinned ({pinned.length})
             </span>
             <ChevronRight
-              className={cn("h-3.5 w-3.5 transition-transform", pinnedOpen && "rotate-90")}
+              className={cn(
+                "h-3.5 w-3.5 transition-transform",
+                pinnedOpen && "rotate-90",
+              )}
               aria-hidden
             />
           </button>
@@ -425,7 +457,8 @@ export function ChatRoom({
                     {message.sender?.displayName ?? "Removed member"}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                    {message.body || (message.deletedAt ? "This message was deleted." : "")}
+                    {message.body ||
+                      (message.deletedAt ? "This message was deleted." : "")}
                   </span>
                   <span className="shrink-0 text-[10px] text-muted-foreground">
                     {new Date(message.createdAt).toLocaleDateString(undefined, {
@@ -486,7 +519,8 @@ export function ChatRoom({
         </div>
       ) : null}
 
-<MessageComposer
+      <MessageComposer
+        enterToSend={enterToSend}
         disabled={!permissions.canSend}
         disabledReason="You don't have permission to send messages in Family Chat."
         replyingTo={replyingTo}

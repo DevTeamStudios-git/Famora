@@ -3,17 +3,19 @@ import { createServerClient } from "@supabase/ssr";
 import { env } from "@/lib/env";
 
 /**
- * Edge middleware: refreshes the Auth session and performs coarse-grained
+ * Request proxy: refreshes the Auth session and performs coarse-grained
  * route protection. Fine-grained authorization (whitelist check, family
  * membership, roles) is enforced server-side in layouts/pages and server
  * actions — middleware is never the sole gate.
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
     return response;
   }
+  // Native API routes validate bearer tokens themselves and return JSON 401s.
+  if (request.nextUrl.pathname.startsWith("/api/mobile")) return response;
 
   const supabase = createServerClient(
     env.NEXT_PUBLIC_SUPABASE_URL,
@@ -37,11 +39,13 @@ export async function middleware(request: NextRequest) {
   );
 
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data,
+  } = await supabase.auth.getClaims();
+  const user = data?.claims;
 
   const pathname = request.nextUrl.pathname;
-  const isAuthRoute = pathname.startsWith("/login") || pathname.startsWith("/auth");
+  const isAuthRoute =
+    pathname.startsWith("/login") || pathname.startsWith("/auth");
   const isPublicRoute =
     pathname.startsWith("/setup") || pathname.startsWith("/access-denied");
 
@@ -51,9 +55,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && (pathname === "/login" || pathname.startsWith("/auth"))) {
+  if (user && pathname === "/login") {
     const url = request.nextUrl.clone();
     url.pathname = "/";
+    url.search = "?start=1";
     return NextResponse.redirect(url);
   }
 

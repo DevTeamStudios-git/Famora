@@ -1,7 +1,4 @@
-import { FeaturePlaceholder } from "@/components/core/feature-placeholder";
-import type { Metadata } from "next";
-export const metadata: Metadata = { title: "Tasks" };
-
+import { WorkspacePage } from "@/components/core/workspace-page";
 export default function Page() {
-  return <FeaturePlaceholder title="Tasks" description="Shared family to-do list." />;
+  return <WorkspacePage kind="tasks" />;
 }

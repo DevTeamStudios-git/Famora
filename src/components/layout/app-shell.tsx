@@ -2,6 +2,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import type { ShellUser } from "@/components/layout/user-menu";
+import { NavigationProgress } from "@/components/layout/navigation-progress";
 
 type AppShellProps = {
   user: ShellUser;
@@ -20,6 +21,7 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <div className="flex min-h-dvh w-full bg-background">
+      <NavigationProgress />
       <AppSidebar
         user={user}
         familyName={familyName}
@@ -33,7 +35,7 @@ export function AppShell({
           isAdmin={isAdmin}
           enabledFeatures={enabledFeatures}
         />
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-24 sm:px-6 lg:px-8 lg:pb-8">
+        <main className="workspace-canvas mx-auto w-full flex-1 px-4 py-6 pb-24 sm:px-7 lg:px-9 lg:py-8 lg:pb-8">
           {children}
         </main>
       </div>

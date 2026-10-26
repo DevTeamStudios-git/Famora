@@ -75,7 +75,12 @@ export type ChatMessage = {
   deletedAt: string | null;
   sender: MessageSender | null;
   replyTo: { id: string; body: string; sender: MessageSender | null } | null;
-  reactions: { emoji: string; count: number; reactedByMe: boolean; members: MessageSender[] }[];
+  reactions: {
+    emoji: string;
+    count: number;
+    reactedByMe: boolean;
+    members: MessageSender[];
+  }[];
   isPinned: boolean;
   isSavedByMe: boolean;
   isMine: boolean;
@@ -84,7 +89,11 @@ export type ChatMessage = {
 };
 
 function toSender(
-  member: { id: string; displayRole: string; user: { displayName: string; avatarUrl: string | null } } | null,
+  member: {
+    id: string;
+    displayRole: string;
+    user: { displayName: string; avatarUrl: string | null };
+  } | null,
 ): MessageSender | null {
   if (!member) return null;
   return {
@@ -194,7 +203,10 @@ function buildInclude(viewerMemberId: string) {
     ...senderInclude(),
     ...reactionInclude(),
     pinnedMessage: true,
-    savedMessages: { where: { memberId: viewerMemberId }, select: { id: true } },
+    savedMessages: {
+      where: { memberId: viewerMemberId },
+      select: { id: true },
+    },
   };
 }
 
@@ -202,7 +214,9 @@ function buildInclude(viewerMemberId: string) {
 async function signAttachmentUrls(
   rows: MessageRelationRow[],
 ): Promise<Map<string, string>> {
-  const paths = rows.flatMap((row) => row.attachments.map((a) => a.blob.storagePath));
+  const paths = rows.flatMap((row) =>
+    row.attachments.map((a) => a.blob.storagePath),
+  );
   const map = new Map<string, string>();
   if (paths.length === 0) return map;
 
@@ -227,9 +241,16 @@ function projectMessage(
   viewerMemberId: string,
   signedUrls: Map<string, string>,
 ): ChatMessage {
-  const reactionMap = new Map<string, { count: number; reactedByMe: boolean; members: MessageSender[] }>();
+  const reactionMap = new Map<
+    string,
+    { count: number; reactedByMe: boolean; members: MessageSender[] }
+  >();
   for (const reaction of row.reactions) {
-    const entry = reactionMap.get(reaction.emoji) ?? { count: 0, reactedByMe: false, members: [] };
+    const entry = reactionMap.get(reaction.emoji) ?? {
+      count: 0,
+      reactedByMe: false,
+      members: [],
+    };
     entry.count += 1;
     const member = toSender(reaction.member);
     if (member) entry.members.push(member);
@@ -286,7 +307,9 @@ export type ChatMemberProfile = {
 };
 
 /** Public-safe profile for one member (used for typing presence). */
-export async function getMemberProfile(memberId: string): Promise<ChatMemberProfile | null> {
+export async function getMemberProfile(
+  memberId: string,
+): Promise<ChatMemberProfile | null> {
   const member = await prisma.familyMember.findUnique({
     where: { id: memberId },
     select: {
@@ -334,13 +357,36 @@ export async function listPinnedMessages(
   return rows.map((row) => projectMessage(row, viewerMemberId, signedUrls));
 }
 
+/** Saved rows are always scoped to the viewing member and family conversation. */
+export async function listSavedMessages(
+  conversationId: string,
+  viewerMemberId: string,
+): Promise<ChatMessage[]> {
+  const rows = await prisma.message.findMany({
+    where: {
+      conversationId,
+      savedMessages: { some: { memberId: viewerMemberId } },
+    },
+    orderBy: { createdAt: "desc" },
+    include: buildInclude(viewerMemberId),
+  });
+  const signedUrls = await signAttachmentUrls(rows);
+  return rows.map((row) => projectMessage(row, viewerMemberId, signedUrls));
+}
+
 /** Fetches and projects a single message the same way listFamilyMessages does. */
 export async function getFamilyMessage(
   messageId: string,
   viewerMemberId: string,
 ): Promise<ChatMessage | null> {
-  const row = await prisma.message.findUnique({
-    where: { id: messageId },
+  const row = await prisma.message.findFirst({
+    where: {
+      id: messageId,
+      conversation: {
+        type: "FAMILY_CHAT",
+        family: { members: { some: { id: viewerMemberId, status: "ACTIVE" } } },
+      },
+    },
     include: buildInclude(viewerMemberId),
   });
   if (!row) return null;

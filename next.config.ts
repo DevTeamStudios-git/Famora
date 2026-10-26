@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  distDir: process.env.FAMORA_E2E === "1" ? ".next-e2e" : ".next",
+  experimental: { serverActions: { bodySizeLimit: "11mb" } },
   images: {
     remotePatterns: [
       {

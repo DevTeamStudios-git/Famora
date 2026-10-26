@@ -4,10 +4,15 @@ import { CalendarDays } from "lucide-react";
 import { getAccessState } from "@/lib/auth/session";
 import { hasPermission } from "@/lib/authorization/authorization";
 import { getFamilyWithFeatures } from "@/server/queries/family";
-import { listFamilyEvents, listFamilyEventCategories, listFamilyMembersForAgenda } from "@/server/queries/agenda";
+import {
+  listFamilyEvents,
+  listFamilyEventCategories,
+  listFamilyMembersForAgenda,
+} from "@/server/queries/agenda";
 import { EmptyState } from "@/components/core/empty-state";
 import { AgendaView } from "@/components/agenda/agenda-view";
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek } from "date-fns";
+import { prisma } from "@/lib/prisma/client";
 
 export const metadata: Metadata = { title: "Family Agenda" };
 
@@ -27,7 +32,11 @@ export default async function AgendaPage() {
       <div className="mt-6">
         <EmptyState
           icon={CalendarDays}
-          title={agendaEnabled ? "No access to Family Agenda" : "Family Agenda is disabled"}
+          title={
+            agendaEnabled
+              ? "No access to Family Agenda"
+              : "Family Agenda is disabled"
+          }
           description={
             agendaEnabled
               ? "You don't have permission to view the Family Agenda."
@@ -48,6 +57,10 @@ export default async function AgendaPage() {
     listFamilyEventCategories(familyId),
     listFamilyMembersForAgenda(familyId),
   ]);
+  const preferences = await prisma.familyMemberSettings.findUnique({
+    where: { memberId },
+    select: { defaultAgendaView: true },
+  });
 
   return (
     <div className="agenda-full-bleed flex flex-1 min-h-0 flex-col">
@@ -57,6 +70,18 @@ export default async function AgendaPage() {
         initialEvents={events}
         initialCategories={categories}
         initialMembers={members}
+        defaultView={
+          (preferences?.defaultAgendaView ?? "month") as
+            "day" | "week" | "month" | "year" | "agenda"
+        }
+        permissions={{
+          canCreate: hasPermission(membership, "agenda.event.create"),
+          canEditOwn: hasPermission(membership, "agenda.event.update.own"),
+          canEditAny: hasPermission(membership, "agenda.event.update.any"),
+          canDeleteOwn: hasPermission(membership, "agenda.event.delete.own"),
+          canDeleteAny: hasPermission(membership, "agenda.event.delete.any"),
+          canManage: hasPermission(membership, "agenda.manage"),
+        }}
       />
     </div>
   );

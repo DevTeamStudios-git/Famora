@@ -1,7 +1,4 @@
-import { FeaturePlaceholder } from "@/components/core/feature-placeholder";
-import type { Metadata } from "next";
-export const metadata: Metadata = { title: "Personal Notebook" };
-
+import { SettingsPage } from "@/components/core/settings-page";
 export default function Page() {
-  return <FeaturePlaceholder title="Personal Notebook" description="Your private notebook preferences." note="This settings section will provide the controls described in the Famora specification." />;
+  return <SettingsPage section="personal-notebook" />;
 }

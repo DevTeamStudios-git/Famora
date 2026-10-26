@@ -2,18 +2,18 @@
 
 ## Modules
 
-| path | responsibility |
-| --- | --- |
-| `src/lib/authorization/` | Roles, permission registry, effective-permission resolution, whitelist seed, public-member masking. The only place authorization rules are defined. |
-| `src/lib/auth/session.ts` | `getAccessState()` (unauthenticated / denied / authorized), `ensureMembership()` (auto-provisions whitelisted users). |
-| `src/lib/supabase/` | `createBrowserClient` / `createServerClient` (cookie-based). |
-| `src/lib/realtime/` | Channel naming (`family:{id}:...`), activity types, typing payloads. |
-| `src/lib/validation/` | Zod schemas — runtime validation, never trust types. |
-| `src/server/queries/` | Server-only data access (family + features). |
-| `src/components/ui/` | Radix + Tailwind primitives (shadcn-style kit). |
-| `src/app/(family)/` | Authenticated family shell + access gate. |
-| `src/app/admin/` | Admin Panel, guarded by `admin_panel.access` (server-side). |
-| `src/app/setup/` | Pre-configuration notice when Supabase env is missing. |
+| path                      | responsibility                                                                                                                                      |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/authorization/`  | Roles, permission registry, effective-permission resolution, whitelist seed, public-member masking. The only place authorization rules are defined. |
+| `src/lib/auth/session.ts` | `getAccessState()` (unauthenticated / denied / authorized), `ensureMembership()` (auto-provisions whitelisted users).                               |
+| `src/lib/supabase/`       | `createBrowserClient` / `createServerClient` (cookie-based).                                                                                        |
+| `src/lib/realtime/`       | Channel naming (`family:{id}:...`), activity types, typing payloads.                                                                                |
+| `src/lib/validation/`     | Zod schemas — runtime validation, never trust types.                                                                                                |
+| `src/server/queries/`     | Server-only data access (family + features).                                                                                                        |
+| `src/components/ui/`      | Radix + Tailwind primitives (shadcn-style kit).                                                                                                     |
+| `src/app/(family)/`       | Authenticated family shell + access gate.                                                                                                           |
+| `src/app/admin/`          | Admin Panel, guarded by `admin_panel.access` (server-side).                                                                                         |
+| `src/app/setup/`          | Pre-configuration notice when Supabase env is missing.                                                                                              |
 
 ## Hard requirements — decision log
 
@@ -27,7 +27,7 @@
 - **Two authorization layers**: app server (`hasPermission`, includes
   `FamilyGrant` merges) and RLS (family-scoped least privilege). When they
   differ, the app layer is authoritative — RLS is a safety floor that never
-  *widens* access.
+  _widens_ access.
 - **Secrets [`§42.27`]**: `.env`/`.env.local` ignored; service-role key and DB
   passwords are never referenced from client components; `src/lib/env.ts`
   is the single access point.
@@ -41,12 +41,22 @@
 - Apply order: Prisma migrations (DDL) → `0001_enable_rls.sql` →
   `0002_seed_permissions.sql` → `0003_storage_policies.sql` → `seed.sql`.
 
-## Open items for the next agents
+## Implementation status
 
-- Real Supabase project + Google OAuth credentials (blocked locally).
-- Functional implementations behind the stub pages (chat realtime, agenda CRUD,
-  tasks, notebook editor, files/upload, memories, admin tables).
-- `prisma migrate` can only run once a reachable Postgres exists; schema is
-  `validate`d + generated in CI instead.
-- Decide column-level `@map` to snake_case later for pure-SQL ergonomics
-  (requires re-migrating; deferred by design).
+The family modules and admin/settings routes now have persisted implementations.
+See [feature-status.md](feature-status.md) for functionality, verification, and
+remaining release work. Main content changes use Prisma through authenticated,
+permission-checked server actions. Chat uses Supabase Realtime; other workspaces
+refresh every 15 seconds while visible.
+
+`FAMORA_FAMILY_ID` selects a deployment's family and defaults to the original
+seed family. Authenticated browser tests select an isolated disposable family;
+they use genuine Supabase sessions, without an authentication bypass.
+
+`pnpm db:verify-migrations` replays Prisma migrations into a disposable schema
+inside a transaction and rolls it back. The deployed project requires the
+`restore_chat_access_and_public_rls` Supabase migration: it restores participant
+reads, private broadcasts, upload ownership policies and chat publications.
+Other tables without Data API policies deliberately deny direct client reads;
+the application accesses them through server actions with explicit permission
+and family/owner predicates.

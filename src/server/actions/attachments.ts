@@ -12,15 +12,19 @@
 // anything is written to the database.
 
 import { z } from "zod";
+import { requireAccess } from "@/server/workspace-access";
 import { prisma } from "@/lib/prisma/client";
-import { getAccessState } from "@/lib/auth/session";
 import { hasPermission } from "@/lib/authorization/authorization";
 import {
   getOrCreateFamilyChatConversation,
   getFamilyMessage,
   type ChatMessage,
 } from "@/server/queries/chat";
-import { statUploadedObject, sniffUploadedMimeType, deleteUploadedObjects } from "@/lib/storage/sniff";
+import {
+  statUploadedObject,
+  sniffUploadedMimeType,
+  deleteUploadedObjects,
+} from "@/lib/storage/sniff";
 import {
   categoryForMime,
   maxSizeForCategory,
@@ -33,7 +37,8 @@ import {
 
 const STORAGE_BUCKET = "families";
 
-type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
+type ActionResult<T = void> =
+  { ok: true; data: T } | { ok: false; error: string };
 
 const attachmentItemSchema = z.object({
   path: z.string().min(1).max(600),
@@ -51,19 +56,29 @@ const inputSchema = z
   .object({
     body: z.string().max(10_000).default(""),
     replyToId: z.string().uuid().optional().nullable(),
-    attachments: z.array(attachmentItemSchema).max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE).default([]),
+    attachments: z
+      .array(attachmentItemSchema)
+      .max(CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
+      .default([]),
     voice: voiceItemSchema.optional().nullable(),
   })
-  .refine((v) => v.body.trim().length > 0 || v.attachments.length > 0 || v.voice, {
-    message: "A message needs text, an attachment, or a voice note.",
-  })
+  .refine(
+    (v) => v.body.trim().length > 0 || v.attachments.length > 0 || v.voice,
+    {
+      message: "A message needs text, an attachment, or a voice note.",
+    },
+  )
   .refine((v) => !(v.voice && v.attachments.length > 0), {
     message: "Voice messages can't be combined with other attachments.",
   });
 
 async function requireAuthorized() {
-  const access = await getAccessState();
-  if (access.status !== "authorized") throw new Error("Not authorized.");
+  const access = await requireAccess("chat.send", "chat");
+  const settings = await prisma.familySettings.findUnique({
+    where: { familyId: access.familyId },
+  });
+  if (settings?.chatEnabled === false)
+    throw new Error("Family chat is disabled.");
   return access;
 }
 
@@ -84,7 +99,8 @@ export async function createUploadStaging(
     return { ok: false, error: "You don't have permission to send messages." };
   }
 
-  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180) || "file";
+  const safeName =
+    fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-180) || "file";
   const draftId = crypto.randomUUID();
   const path = `${access.familyId}/chat/${draftId}/${safeName}`;
 
@@ -118,7 +134,7 @@ export async function cancelUploadStaging(path: string): Promise<ActionResult> {
  * finalizeChatMessage() and have it attached to a message they didn't
  * upload. A random UUID path is hard to guess, but authorization must not
  * rest on secrecy of a path — see createUploadStaging() above.
- * 
+ *
  * Also enforces purpose binding: voice paths must have been staged as VOICE,
  * attachment paths must have been staged as ATTACHMENT.
  */
@@ -128,21 +144,43 @@ async function assertOwnedStagedPaths(
   expectedPurpose: Map<string, "ATTACHMENT" | "VOICE">,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (paths.length === 0) return { ok: true };
-  const rows: { storagePath: string; familyId: string; memberId: string; purpose: "ATTACHMENT" | "VOICE" }[] =
-    await prisma.chatUploadStaging.findMany({
-      where: { storagePath: { in: paths } },
-      select: { storagePath: true, familyId: true, memberId: true, purpose: true },
-    });
+  const rows: {
+    storagePath: string;
+    familyId: string;
+    memberId: string;
+    purpose: "ATTACHMENT" | "VOICE";
+  }[] = await prisma.chatUploadStaging.findMany({
+    where: { storagePath: { in: paths } },
+    select: {
+      storagePath: true,
+      familyId: true,
+      memberId: true,
+      purpose: true,
+    },
+  });
   const byPath = new Map<
     string,
-    { storagePath: string; familyId: string; memberId: string; purpose: "ATTACHMENT" | "VOICE" }
+    {
+      storagePath: string;
+      familyId: string;
+      memberId: string;
+      purpose: "ATTACHMENT" | "VOICE";
+    }
   >(rows.map((r) => [r.storagePath, r]));
 
   for (const path of paths) {
     const staged = byPath.get(path);
     const expected = expectedPurpose.get(path);
-    if (!staged || staged.memberId !== access.memberId || staged.familyId !== access.familyId) {
-      return { ok: false, error: "One of those attachments couldn't be verified. Please re-upload." };
+    if (
+      !staged ||
+      staged.memberId !== access.memberId ||
+      staged.familyId !== access.familyId
+    ) {
+      return {
+        ok: false,
+        error:
+          "One of those attachments couldn't be verified. Please re-upload.",
+      };
     }
     if (expected && staged.purpose !== expected) {
       return { ok: false, error: "Invalid upload type. Please re-upload." };
@@ -167,10 +205,14 @@ async function verifyStagedObject(
   caption: string | undefined,
 ): Promise<VerifiedItem | { error: string }> {
   const stat = await statUploadedObject(STORAGE_BUCKET, path);
-  if (!stat) return { error: `"${fileName}" wasn't found in storage — upload may have failed.` };
+  if (!stat)
+    return {
+      error: `"${fileName}" wasn't found in storage — upload may have failed.`,
+    };
 
   const mimeType = await sniffUploadedMimeType(STORAGE_BUCKET, path);
-  if (!mimeType) return { error: `Couldn't verify the content of "${fileName}".` };
+  if (!mimeType)
+    return { error: `Couldn't verify the content of "${fileName}".` };
 
   const category = categoryForMime(mimeType);
   if (!category) return { error: `"${fileName}" isn't a supported file type.` };
@@ -180,7 +222,14 @@ async function verifyStagedObject(
     return { error: `"${fileName}" is too large for its type.` };
   }
 
-  return { path, fileName, caption: caption ?? null, category, size: stat.size, mimeType };
+  return {
+    path,
+    fileName,
+    caption: caption ?? null,
+    category,
+    size: stat.size,
+    mimeType,
+  };
 }
 
 export async function finalizeChatMessage(
@@ -193,9 +242,21 @@ export async function finalizeChatMessage(
 
   const parsed = inputSchema.safeParse(rawInput);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid message." };
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid message.",
+    };
   }
   const input = parsed.data;
+
+  const settings = await prisma.familySettings.findUnique({
+    where: { familyId: access.familyId },
+  });
+  if (
+    (input.attachments.length && settings?.attachmentsEnabled === false) ||
+    (input.voice && settings?.voiceMessagesEnabled === false)
+  )
+    return { ok: false, error: "This type of message is disabled." };
 
   const allPaths = [
     ...input.attachments.map((a) => a.path),
@@ -203,10 +264,15 @@ export async function finalizeChatMessage(
   ];
 
   const expectedPurpose = new Map<string, "ATTACHMENT" | "VOICE">();
-  for (const item of input.attachments) expectedPurpose.set(item.path, "ATTACHMENT");
+  for (const item of input.attachments)
+    expectedPurpose.set(item.path, "ATTACHMENT");
   if (input.voice) expectedPurpose.set(input.voice.path, "VOICE");
 
-  const ownership = await assertOwnedStagedPaths(allPaths, access, expectedPurpose);
+  const ownership = await assertOwnedStagedPaths(
+    allPaths,
+    access,
+    expectedPurpose,
+  );
   if (!ownership.ok) {
     return { ok: false, error: ownership.error };
   }
@@ -216,7 +282,11 @@ export async function finalizeChatMessage(
   let verifiedVoice: VerifiedItem | null = null;
 
   for (const item of input.attachments) {
-    const result = await verifyStagedObject(item.path, item.fileName, item.caption);
+    const result = await verifyStagedObject(
+      item.path,
+      item.fileName,
+      item.caption,
+    );
     if ("error" in result) {
       await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
       return { ok: false, error: result.error };
@@ -229,14 +299,21 @@ export async function finalizeChatMessage(
       await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
       return { ok: false, error: "Voice message is too long." };
     }
-    const result = await verifyStagedObject(input.voice.path, input.voice.fileName, undefined);
+    const result = await verifyStagedObject(
+      input.voice.path,
+      input.voice.fileName,
+      undefined,
+    );
     if ("error" in result) {
       await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
       return { ok: false, error: result.error };
     }
     if (!isVoiceRecordingMimeType(result.mimeType)) {
       await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
-      return { ok: false, error: "That doesn't look like a valid voice recording." };
+      return {
+        ok: false,
+        error: "That doesn't look like a valid voice recording.",
+      };
     }
     if (result.size > CHAT_VOICE_MESSAGE_MAX_SIZE) {
       await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
@@ -284,7 +361,9 @@ export async function finalizeChatMessage(
           type: messageType,
           body: input.body.trim(),
           replyToId,
-          metadata: verifiedVoice ? { durationMs: input.voice!.durationMs } : undefined,
+          metadata: verifiedVoice
+            ? { durationMs: input.voice!.durationMs }
+            : undefined,
         },
       });
 
@@ -302,14 +381,20 @@ export async function finalizeChatMessage(
           },
         });
         await tx.messageAttachment.create({
-          data: { messageId: message.id, blobId: blob.id, caption: item.caption },
+          data: {
+            messageId: message.id,
+            blobId: blob.id,
+            caption: item.caption,
+          },
         });
       }
 
       // Staging rows are single-use — clear them now that the objects they
       // guarded are real MessageAttachments.
       if (allPaths.length > 0) {
-        await tx.chatUploadStaging.deleteMany({ where: { storagePath: { in: allPaths } } });
+        await tx.chatUploadStaging.deleteMany({
+          where: { storagePath: { in: allPaths } },
+        });
       }
 
       return message;
@@ -321,6 +406,9 @@ export async function finalizeChatMessage(
       : { ok: false, error: "Message sent." };
   } catch {
     await deleteUploadedObjects(STORAGE_BUCKET, allPaths);
-    return { ok: false, error: "Couldn't send that message. Please try again." };
+    return {
+      ok: false,
+      error: "Couldn't send that message. Please try again.",
+    };
   }
 }

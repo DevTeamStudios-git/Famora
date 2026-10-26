@@ -8,6 +8,8 @@
 // identity belongs to the family.
 
 import "server-only";
+import { cache } from "react";
+import { nativeAccessToken, memoNativeRequest } from "@/lib/auth/native-context";
 
 import type { User } from "@supabase/supabase-js";
 import { prisma } from "@/lib/prisma/client";
@@ -15,7 +17,6 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import type { MembershipContext } from "@/lib/authorization/authorization";
 import { getDisplayRole, type InternalRole } from "@/lib/authorization/roles";
 import {
-  isSeedWhitelistedEmail,
   normalizeWhitelistEmail,
   seedRoleForEmail,
 } from "@/lib/authorization/whitelist";
@@ -40,22 +41,18 @@ export type AccessState =
  * The initial deployment is a single-family platform; multi-family support can
  * wrap this with a familyId parameter later.
  */
-export async function getAccessState(): Promise<AccessState> {
+export const getAccessState = cache(() => memoNativeRequest("access", resolveAccessState));
+async function resolveAccessState(): Promise<AccessState> {
   const supabase = await getSupabaseServerClient();
   const {
     data: { user },
-  } = await supabase.auth.getUser();
+  } = await supabase.auth.getUser(nativeAccessToken());
 
   if (!user?.email) {
     return { status: "unauthenticated" };
   }
 
   const email = normalizeEmail(user.email);
-
-  // Whitelist check: authenticated identity must be an approved account.
-  if (!isSeedWhitelistedEmail(email)) {
-    return { status: "denied", user };
-  }
 
   const internalRole = await resolvePersistedRole(email);
   if (!internalRole) {
@@ -69,6 +66,8 @@ export async function getAccessState(): Promise<AccessState> {
       user.email,
     avatarUrl: (user.user_metadata?.avatar_url as string | undefined) ?? null,
   });
+
+  if (!membership.membershipActive) return { status: "denied", user };
 
   return {
     status: "authorized",
@@ -109,14 +108,20 @@ async function ensureMembership(
   internalRole: InternalRole,
   profile: { displayName: string; avatarUrl: string | null },
 ): Promise<MembershipContext> {
-  // A membership points at a users row (family_members.userId → users.id).
-  // First sign-in has no User yet, so provision it before creating the member.
-  await prisma.user.upsert({
+  const existing = await prisma.familyMember.findFirst({
+    where: { userId, familyId: FAMORA_SEED_FAMILY_ID },
+    include: { grants: true, user: { select: { lastActiveAt: true, email: true } } },
+  });
+  // Ordinary reads do not rewrite identity and membership rows. Activity is
+  // sampled at most once every five minutes, keeping navigation read-heavy.
+  if (existing?.status === "ACTIVE" && existing.user &&
+    (!existing.user.lastActiveAt || Date.now() - existing.user.lastActiveAt.getTime() > 300000)) {
+    await prisma.user.update({ where: { id: userId }, data: { email, lastActiveAt: new Date() } });
+  }
+  if (!existing) await prisma.user.upsert({
     where: { id: userId },
     update: {
       email,
-      displayName: profile.displayName,
-      avatarUrl: profile.avatarUrl,
       lastActiveAt: new Date(),
     },
     create: {
@@ -128,27 +133,22 @@ async function ensureMembership(
     },
   });
 
-  const existing = await prisma.familyMember.findFirst({
-    where: {
-      userId,
-      familyId: FAMORA_SEED_FAMILY_ID,
-      status: { in: ["ACTIVE", "PENDING"] },
-    },
-    include: { grants: true },
-  });
-
-  const member =
-    existing ??
-    (await prisma.familyMember.create({
-      data: {
-        userId,
-        familyId: FAMORA_SEED_FAMILY_ID,
-        internalRole,
-        displayRole: getDisplayRole(internalRole),
-        status: "ACTIVE",
-      },
-      include: { grants: true },
-    }));
+  const member = existing
+    ? existing.status !== "ACTIVE" || existing.internalRole === internalRole ? existing : await prisma.familyMember.update({
+        where: { id: existing.id },
+        data: { internalRole, displayRole: getDisplayRole(internalRole) },
+        include: { grants: true },
+      })
+    : await prisma.familyMember.create({
+        data: {
+          userId,
+          familyId: FAMORA_SEED_FAMILY_ID,
+          internalRole,
+          displayRole: getDisplayRole(internalRole),
+          status: "ACTIVE",
+        },
+        include: { grants: true },
+      });
 
   const grants: Record<string, boolean> = {};
   for (const grant of member.grants) {

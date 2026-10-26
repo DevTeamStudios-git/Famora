@@ -57,7 +57,9 @@ function zoneOffsetMs(date: Date, timeZone: string): number {
       minute: "2-digit",
       second: "2-digit",
     });
-    const p = Object.fromEntries(dtf.formatToParts(date).map((x) => [x.type, x.value]));
+    const p = Object.fromEntries(
+      dtf.formatToParts(date).map((x) => [x.type, x.value]),
+    );
     const asUtc = Date.UTC(
       Number(p.year),
       Number(p.month) - 1,
@@ -72,7 +74,8 @@ function zoneOffsetMs(date: Date, timeZone: string): number {
   }
 }
 
-const toFloating = (d: Date, tz: string): Date => new Date(d.getTime() + zoneOffsetMs(d, tz));
+const toFloating = (d: Date, tz: string): Date =>
+  new Date(d.getTime() + zoneOffsetMs(d, tz));
 const fromFloating = (d: Date, tz: string): Date => {
   // two-pass: offset depends on the resolved instant
   const guess = new Date(d.getTime() - zoneOffsetMs(d, tz));
@@ -113,6 +116,7 @@ export function expandEvents<T extends EventRow>(
   const out: Occurrence<T>[] = [];
 
   for (const base of bases) {
+    if (base.status === "CANCELLED") continue;
     const s = getStart(base);
     const e = getEnd(base);
     const durationMs = e.getTime() - s.getTime();
@@ -148,16 +152,23 @@ export function expandEvents<T extends EventRow>(
     }
 
     const overrides = overridesBySeries.get(base.id) ?? [];
-    const overriddenSlots = overrides.map((o) => o.recurrenceInstanceAt).filter(Boolean) as Date[];
+    const overriddenSlots = overrides
+      .map((o) => o.recurrenceInstanceAt)
+      .filter(Boolean) as Date[];
 
     // widen the query by the duration so an event that *started* before the
     // window but still overlaps it is included
     const queryStart = new Date(windowStart.getTime() - durationMs);
-    const slots = rule.between(toFloating(queryStart, tz), toFloating(windowEnd, tz), true);
+    const slots = rule.between(
+      toFloating(queryStart, tz),
+      toFloating(windowEnd, tz),
+      true,
+    );
 
     for (const floating of slots) {
       const start = base.isAllDay ? floating : fromFloating(floating, tz);
-      if (base.recurrenceExceptions.some((ex) => sameInstant(ex, start))) continue;
+      if (base.recurrenceExceptions.some((ex) => sameInstant(ex, start)))
+        continue;
       if (overriddenSlots.some((slot) => sameInstant(slot, start))) continue;
 
       const end = new Date(start.getTime() + durationMs);
@@ -197,15 +208,23 @@ export function expandEvents<T extends EventRow>(
   }
 
   return out.sort(
-    (a, b) => a.start.getTime() - b.start.getTime() || a.end.getTime() - b.end.getTime(),
+    (a, b) =>
+      a.start.getTime() - b.start.getTime() ||
+      a.end.getTime() - b.end.getTime(),
   );
 }
 
 /** UNTIL immediately before `instanceAt` — used by "this and following". */
-export function truncateRuleBefore(rule: string, instanceAt: Date, timeZone: string): string {
+export function truncateRuleBefore(
+  rule: string,
+  instanceAt: Date,
+  timeZone: string,
+): string {
   const until = new Date(toFloating(instanceAt, timeZone).getTime() - 60_000);
   const stamp = `${until.toISOString().replace(/[-:]/g, "").split(".")[0]}Z`;
-  const cleaned = rule.replace(/;?UNTIL=[^;]*/i, "").replace(/;?COUNT=[^;]*/i, "");
+  const cleaned = rule
+    .replace(/;?UNTIL=[^;]*/i, "")
+    .replace(/;?COUNT=[^;]*/i, "");
   return `${cleaned};UNTIL=${stamp}`.replace(/RRULE:;/, "RRULE:");
 }
 
@@ -217,7 +236,9 @@ export function computeRecurrenceEnd(
   durationMs: number,
 ): Date | null {
   try {
-    const r = rrulestr(rule, { dtstart: toFloating(dtstart, timeZone) }) as RRule;
+    const r = rrulestr(rule, {
+      dtstart: toFloating(dtstart, timeZone),
+    }) as RRule;
     const all = r.options.until || r.options.count ? r.all() : null;
     if (!all || all.length === 0) return null; // infinite
     const last = all[all.length - 1] as unknown as Date;

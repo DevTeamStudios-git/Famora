@@ -1,8 +1,13 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma/client";
+import { expandEvents } from "@/lib/agenda/recurrence";
 
 export type AgendaEvent = {
+  version: number;
+  occurrenceKey?: string;
+  seriesStartAt?: string;
+  seriesEndAt?: string;
   id: string;
   familyId: string;
   categoryId: string | null;
@@ -72,13 +77,25 @@ export async function listFamilyEvents(
     where: {
       familyId,
       deletedAt: null,
-      OR: [
-        // Events that start within the range
-        { startAt: { gte: startAt, lte: endAt } },
-        // Events that end within the range
-        { endAt: { gte: startAt, lte: endAt } },
-        // Events that span the entire range
-        { AND: [{ startAt: { lte: startAt } }, { endAt: { gte: endAt } }] },
+      AND: [
+        {
+          OR: [
+            { visibility: "FAMILY" },
+            { createdByMemberId: memberId },
+            { attendees: { some: { memberId } } },
+          ],
+        },
+        {
+          OR: [
+            { recurrenceRule: { not: null }, startAt: { lte: endAt } },
+            // Events that start within the range
+            { startAt: { gte: startAt, lte: endAt } },
+            // Events that end within the range
+            { endAt: { gte: startAt, lte: endAt } },
+            // Events that span the entire range
+            { AND: [{ startAt: { lte: startAt } }, { endAt: { gte: endAt } }] },
+          ],
+        },
       ],
     },
     include: {
@@ -99,7 +116,16 @@ export async function listFamilyEvents(
     orderBy: { startAt: "asc" },
   });
 
-  return events.map((e) => ({
+  const occurrences = expandEvents(
+    events.map((e) => ({ ...e, isAllDay: e.allDay })),
+    startAt,
+    endAt,
+  );
+  return occurrences.map(({ event: e, start, end, key }) => ({
+    occurrenceKey: key,
+    version: e.version,
+    seriesStartAt: e.startAt.toISOString(),
+    seriesEndAt: e.endAt.toISOString(),
     id: e.id,
     familyId: e.familyId,
     categoryId: e.categoryId,
@@ -107,8 +133,8 @@ export async function listFamilyEvents(
     description: e.description,
     location: e.location,
     videoCallLink: e.videoCallLink,
-    startAt: e.startAt.toISOString(),
-    endAt: e.endAt.toISOString(),
+    startAt: start.toISOString(),
+    endAt: end.toISOString(),
     allDay: e.allDay,
     visibility: e.visibility,
     recurrenceRule: e.recurrenceRule,
@@ -118,7 +144,12 @@ export async function listFamilyEvents(
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
     category: e.category
-      ? { id: e.category.id, familyId: e.category.familyId, name: e.category.name, color: e.category.color }
+      ? {
+          id: e.category.id,
+          familyId: e.category.familyId,
+          name: e.category.name,
+          color: e.category.color,
+        }
       : null,
     attendees: e.attendees.map((a) => ({
       id: a.id,
@@ -147,9 +178,19 @@ export async function listFamilyEvents(
 export async function getFamilyEvent(
   eventId: string,
   familyId: string,
+  memberId: string,
 ): Promise<AgendaEvent | null> {
   const event = await prisma.calendarEvent.findFirst({
-    where: { id: eventId, familyId, deletedAt: null },
+    where: {
+      id: eventId,
+      familyId,
+      deletedAt: null,
+      OR: [
+        { visibility: "FAMILY" },
+        { createdByMemberId: memberId },
+        { attendees: { some: { memberId } } },
+      ],
+    },
     include: {
       category: true,
       attendees: {
@@ -171,6 +212,7 @@ export async function getFamilyEvent(
 
   return {
     id: event.id,
+    version: event.version,
     familyId: event.familyId,
     categoryId: event.categoryId,
     title: event.title,
@@ -188,7 +230,12 @@ export async function getFamilyEvent(
     createdAt: event.createdAt.toISOString(),
     updatedAt: event.updatedAt.toISOString(),
     category: event.category
-      ? { id: event.category.id, familyId: event.category.familyId, name: event.category.name, color: event.category.color }
+      ? {
+          id: event.category.id,
+          familyId: event.category.familyId,
+          name: event.category.name,
+          color: event.category.color,
+        }
       : null,
     attendees: event.attendees.map((a) => ({
       id: a.id,
@@ -214,7 +261,9 @@ export async function getFamilyEvent(
 /**
  * Fetches all event categories for a family.
  */
-export async function listFamilyEventCategories(familyId: string): Promise<AgendaEventCategory[]> {
+export async function listFamilyEventCategories(
+  familyId: string,
+): Promise<AgendaEventCategory[]> {
   const categories = await prisma.eventCategory.findMany({
     where: { familyId },
     orderBy: { name: "asc" },
@@ -231,9 +280,15 @@ export async function listFamilyEventCategories(familyId: string): Promise<Agend
 /**
  * Fetches all family members who can be attendees (ACTIVE status).
  */
-export async function listFamilyMembersForAgenda(familyId: string): Promise<AgendaMember[]> {
+export async function listFamilyMembersForAgenda(
+  familyId: string,
+): Promise<AgendaMember[]> {
   const members = await prisma.familyMember.findMany({
-    where: { familyId, status: "ACTIVE" },
+    where: {
+      familyId,
+      status: "ACTIVE",
+      internalRole: { not: "HIDDEN_ADMIN" },
+    },
     include: {
       user: { select: { displayName: true, avatarUrl: true } },
     },
@@ -260,7 +315,12 @@ export async function createEventCategory(
     data: { familyId, name, color },
   });
 
-  return { id: category.id, familyId: category.familyId, name: category.name, color: category.color };
+  return {
+    id: category.id,
+    familyId: category.familyId,
+    name: category.name,
+    color: category.color,
+  };
 }
 
 /**
@@ -276,12 +336,20 @@ export async function updateEventCategory(
     data,
   });
 
-  return { id: category.id, familyId: category.familyId, name: category.name, color: category.color };
+  return {
+    id: category.id,
+    familyId: category.familyId,
+    name: category.name,
+    color: category.color,
+  };
 }
 
 /**
  * Deletes an event category (only if no events reference it).
  */
-export async function deleteEventCategory(categoryId: string, familyId: string): Promise<void> {
+export async function deleteEventCategory(
+  categoryId: string,
+  familyId: string,
+): Promise<void> {
   await prisma.eventCategory.delete({ where: { id: categoryId, familyId } });
 }

@@ -11,6 +11,5 @@ export default defineConfig({
     // Used by CLI commands (migrate/dev/studio/db push). Migration and schema
     // operations use the direct connection to avoid Supabase pooler limits.
     url: env("DIRECT_URL"),
-    shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL || process.env.DIRECT_URL,
   },
 });

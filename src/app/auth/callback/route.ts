@@ -10,7 +10,19 @@ import { env } from "@/lib/env";
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  if (searchParams.get("native") === "1") {
+    const callback = new URL("famora://auth/callback");
+    if (code) callback.searchParams.set("code", code);
+    else callback.searchParams.set("error", "Google sign-in was cancelled or failed.");
+    return NextResponse.redirect(callback);
+  }
+  const requestedNext = searchParams.get("next") ?? "/?start=1";
+  const next =
+    requestedNext.startsWith("/") &&
+    !requestedNext.startsWith("//") &&
+    !requestedNext.includes("\\")
+      ? requestedNext
+      : "/";
 
   let response = NextResponse.redirect(`${origin}${next}`);
 

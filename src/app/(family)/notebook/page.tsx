@@ -1,7 +1,4 @@
-import { FeaturePlaceholder } from "@/components/core/feature-placeholder";
-import type { Metadata } from "next";
-export const metadata: Metadata = { title: "Family Notebook" };
-
+import { WorkspacePage } from "@/components/core/workspace-page";
 export default function Page() {
-  return <FeaturePlaceholder title="Family Notebook" description="Collaborative family knowledge base." />;
+  return <WorkspacePage kind="notebook" />;
 }

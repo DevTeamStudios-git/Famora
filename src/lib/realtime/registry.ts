@@ -3,6 +3,7 @@
 // validated centrally here.
 
 export const FEATURE_KEYS = {
+  AGENDA: "agenda",
   CHAT: "chat",
   DMS: "dms",
   TASKS: "tasks",
@@ -43,8 +44,18 @@ export type NotificationType =
 
 export const NOTIFICATION_CATEGORIES: Record<string, string[]> = {
   "Family Chat": ["NEW_FAMILY_MESSAGE", "MENTION", "REPLY", "REACTION"],
-  "DMs": ["NEW_DM", "MENTION", "REPLY", "REACTION"],
-  "Agenda": ["EVENT_CREATED", "EVENT_REMINDER", "EVENT_MODIFIED", "BIRTHDAY_REMINDER"],
-  "Tasks": ["TASK_ASSIGNED", "TASK_DEADLINE"],
-  "Family Tools": ["POLL_CREATED", "ANNOUNCEMENT_PUBLISHED", "FILE_UPLOADED", "NOTEBOOK_ACTIVITY"],
+  DMs: ["NEW_DM", "MENTION", "REPLY", "REACTION"],
+  Agenda: [
+    "EVENT_CREATED",
+    "EVENT_REMINDER",
+    "EVENT_MODIFIED",
+    "BIRTHDAY_REMINDER",
+  ],
+  Tasks: ["TASK_ASSIGNED", "TASK_DEADLINE"],
+  "Family Tools": [
+    "POLL_CREATED",
+    "ANNOUNCEMENT_PUBLISHED",
+    "FILE_UPLOADED",
+    "NOTEBOOK_ACTIVITY",
+  ],
 };

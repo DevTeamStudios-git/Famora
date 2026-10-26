@@ -1,7 +1,4 @@
-import { FeaturePlaceholder } from "@/components/core/feature-placeholder";
-import type { Metadata } from "next";
-export const metadata: Metadata = { title: "Announcements" };
-
+import { WorkspacePage } from "@/components/core/workspace-page";
 export default function Page() {
-  return <FeaturePlaceholder title="Announcements" description="Important family-wide notices." />;
+  return <WorkspacePage kind="announcements" />;
 }

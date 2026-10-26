@@ -7,8 +7,13 @@ const eslintConfig = defineConfig([
   ...nextTs,
   // Override default ignores of eslint-config-next.
   globalIgnores([
+    "mobile/**",
     // Default ignores of eslint-config-next:
     ".next/**",
+    ".next-e2e/**",
+    "test-results/**",
+    "playwright-report/**",
+    "e2e/.auth/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

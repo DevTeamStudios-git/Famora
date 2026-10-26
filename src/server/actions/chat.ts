@@ -15,19 +15,34 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma/client";
-import { getAccessState } from "@/lib/auth/session";
 import { hasPermission } from "@/lib/authorization/authorization";
-import { getFamilyMessage, listFamilyMessages, listPinnedMessages, type ChatMessage } from "@/server/queries/chat";
+import {
+  getFamilyMessage,
+  listFamilyMessages,
+  listPinnedMessages,
+  type ChatMessage,
+} from "@/server/queries/chat";
 import { z } from "zod";
+import { requireAccess } from "@/server/workspace-access";
 
-type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
+type ActionResult<T = void> =
+  { ok: true; data: T } | { ok: false; error: string };
 
 async function requireAuthorized() {
-  const access = await getAccessState();
-  if (access.status !== "authorized") {
-    throw new Error("Not authorized.");
-  }
+  const access = await requireAccess("chat.read", "chat");
+  const settings = await prisma.familySettings.findUnique({
+    where: { familyId: access.familyId },
+  });
+  if (settings?.chatEnabled === false)
+    throw new Error("Family chat is disabled.");
   return access;
+}
+
+async function allowedMessage(familyId: string, id: string) {
+  return prisma.message.findFirst({
+    where: { id, conversation: { familyId, type: "FAMILY_CHAT" } },
+    select: { id: true },
+  });
 }
 
 export async function editFamilyMessage(
@@ -35,6 +50,8 @@ export async function editFamilyMessage(
   body: string,
 ): Promise<ActionResult> {
   const access = await requireAuthorized();
+  if (!(await allowedMessage(access.familyId, messageId)))
+    return { ok: false, error: "Message not found." };
   const parsed = z.string().trim().min(1).max(10_000).safeParse(body);
   if (!parsed.success) {
     return { ok: false, error: "Message can't be empty." };
@@ -71,8 +88,12 @@ export async function editFamilyMessage(
   return { ok: true, data: undefined };
 }
 
-export async function deleteFamilyMessage(messageId: string): Promise<ActionResult> {
+export async function deleteFamilyMessage(
+  messageId: string,
+): Promise<ActionResult> {
   const access = await requireAuthorized();
+  if (!(await allowedMessage(access.familyId, messageId)))
+    return { ok: false, error: "Message not found." };
 
   const message = await prisma.message.findUnique({
     where: { id: messageId },
@@ -83,9 +104,15 @@ export async function deleteFamilyMessage(messageId: string): Promise<ActionResu
   }
 
   const isOwn = message.senderMemberId === access.memberId;
-  const canDeleteAny = hasPermission(access.membership, "chat.delete_any_message");
+  const canDeleteAny = hasPermission(
+    access.membership,
+    "chat.delete_any_message",
+  );
   if (!isOwn && !canDeleteAny) {
-    return { ok: false, error: "You don't have permission to delete this message." };
+    return {
+      ok: false,
+      error: "You don't have permission to delete this message.",
+    };
   }
 
   await prisma.message.update({
@@ -121,6 +148,13 @@ export async function toggleMessageReaction(
   emoji: string,
 ): Promise<ActionResult> {
   const access = await requireAuthorized();
+  if (!(await allowedMessage(access.familyId, messageId)))
+    return { ok: false, error: "Message not found." };
+  const settings = await prisma.familySettings.findUnique({
+    where: { familyId: access.familyId },
+  });
+  if (settings?.reactionsEnabled === false)
+    return { ok: false, error: "Reactions are disabled." };
   if (!hasPermission(access.membership, "chat.react")) {
     return { ok: false, error: "Reactions are disabled for you." };
   }
@@ -150,8 +184,12 @@ export async function toggleMessageReaction(
   return { ok: true, data: undefined };
 }
 
-export async function togglePinMessage(messageId: string): Promise<ActionResult> {
+export async function togglePinMessage(
+  messageId: string,
+): Promise<ActionResult> {
   const access = await requireAuthorized();
+  if (!(await allowedMessage(access.familyId, messageId)))
+    return { ok: false, error: "Message not found." };
   if (!hasPermission(access.membership, "chat.pin_any_message")) {
     return { ok: false, error: "You don't have permission to pin messages." };
   }
@@ -215,9 +253,13 @@ export async function fetchRecentMessages(
   const access = await requireAuthorized();
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { familyId: true },
+    select: { familyId: true, type: true },
   });
-  if (!conversation || conversation.familyId !== access.familyId) {
+  if (
+    !conversation ||
+    conversation.familyId !== access.familyId ||
+    conversation.type !== "FAMILY_CHAT"
+  ) {
     return [];
   }
   return listFamilyMessages(conversationId, access.memberId);
@@ -228,20 +270,30 @@ export async function fetchRecentMessages(
  * Used by the chat room's pinned section (authorization-scoped server-side,
  * then projected — pinned rows never carry hidden admin data).
  */
-export async function fetchPinnedMessages(conversationId: string): Promise<ChatMessage[]> {
+export async function fetchPinnedMessages(
+  conversationId: string,
+): Promise<ChatMessage[]> {
   const access = await requireAuthorized();
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { familyId: true },
+    select: { familyId: true, type: true },
   });
-  if (!conversation || conversation.familyId !== access.familyId) {
+  if (
+    !conversation ||
+    conversation.familyId !== access.familyId ||
+    conversation.type !== "FAMILY_CHAT"
+  ) {
     return [];
   }
   return listPinnedMessages(conversationId, access.memberId);
 }
 
-export async function toggleSaveMessage(messageId: string): Promise<ActionResult> {
+export async function toggleSaveMessage(
+  messageId: string,
+): Promise<ActionResult> {
   const access = await requireAuthorized();
+  if (!(await allowedMessage(access.familyId, messageId)))
+    return { ok: false, error: "Message not found." };
 
   const existing = await prisma.savedMessage.findUnique({
     where: {

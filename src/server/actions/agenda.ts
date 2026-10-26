@@ -2,46 +2,92 @@
 
 import { z } from "zod";
 import { prisma } from "@/lib/prisma/client";
-import { getAccessState } from "@/lib/auth/session";
 import { hasPermission } from "@/lib/authorization/authorization";
 import { revalidatePath } from "next/cache";
+import { requireAccess } from "@/server/workspace-access";
+import { listFamilyEvents } from "@/server/queries/agenda";
+import { rrulestr } from "rrule";
 
 const createEventSchema = z.object({
-  title: z.string().min(1).max(200),
+  title: z.string().trim().min(1).max(200),
   description: z.string().max(5000).optional().nullable(),
   location: z.string().max(500).optional().nullable(),
-  videoCallLink: z.string().url().optional().nullable(),
+  videoCallLink: z
+    .string()
+    .url()
+    .regex(/^https?:\/\//i)
+    .optional()
+    .nullable(),
   startAt: z.string().datetime(),
   endAt: z.string().datetime(),
   allDay: z.boolean().default(false),
   visibility: z.enum(["FAMILY", "PRIVATE"]).default("FAMILY"),
-  recurrenceRule: z.string().optional().nullable(),
+  recurrenceRule: z
+    .string()
+    .max(500)
+    .refine((rule) => {
+      try {
+        return (
+          /FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(;|$)/.test(rule) &&
+          Boolean(rrulestr(rule))
+        );
+      } catch {
+        return false;
+      }
+    }, "Use a valid daily, weekly, monthly or yearly recurrence.")
+    .optional()
+    .nullable(),
+  timeZone: z
+    .string()
+    .max(64)
+    .refine((zone) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: zone });
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .default("UTC"),
   categoryId: z.string().uuid().optional().nullable(),
   attendeeIds: z.array(z.string().uuid()).default([]),
-  reminders: z.array(z.object({ minutesBefore: z.number().int().positive() })).default([]),
+  reminders: z
+    .array(z.object({ minutesBefore: z.number().int().positive() }))
+    .default([]),
 });
 
-const updateEventSchema = createEventSchema.partial();
+const updateEventSchema = createEventSchema.partial().extend({
+  allDay: z.boolean().optional(),
+  visibility: z.enum(["FAMILY", "PRIVATE"]).optional(),
+  timeZone: createEventSchema.shape.timeZone.removeDefault().optional(),
+  attendeeIds: z.array(z.string().uuid()).optional(),
+  reminders: z
+    .array(z.object({ minutesBefore: z.number().int().positive() }))
+    .optional(),
+  version: z.number().int().positive().optional(),
+});
 
-type ActionResult<T = void> = { ok: true; data: T } | { ok: false; error: string };
+type ActionResult<T = void> =
+  { ok: true; data: T } | { ok: false; error: string };
 
 async function requireAuthorized() {
-  const access = await getAccessState();
-  if (access.status !== "authorized") throw new Error("Not authorized.");
-  return access;
+  return requireAccess(undefined, "agenda");
 }
 
 export async function createAgendaEvent(
   rawInput: unknown,
 ): Promise<ActionResult<{ id: string }>> {
   const access = await requireAuthorized();
-  if (!hasPermission(access.membership, "agenda.create")) {
+  if (!hasPermission(access.membership, "agenda.event.create")) {
     return { ok: false, error: "You don't have permission to create events." };
   }
 
   const parsed = createEventSchema.safeParse(rawInput);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid event data." };
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid event data.",
+    };
   }
   const input = parsed.data;
 
@@ -69,7 +115,10 @@ export async function createAgendaEvent(
       select: { id: true },
     });
     if (members.length !== input.attendeeIds.length) {
-      return { ok: false, error: "One or more attendees are not family members." };
+      return {
+        ok: false,
+        error: "One or more attendees are not family members.",
+      };
     }
   }
 
@@ -86,23 +135,26 @@ export async function createAgendaEvent(
         allDay: input.allDay,
         visibility: input.visibility,
         recurrenceRule: input.recurrenceRule,
+        timeZone: input.timeZone,
         categoryId: input.categoryId,
         createdByMemberId: access.memberId,
-        attendees: input.attendeeIds.length > 0
-          ? {
-              create: input.attendeeIds.map((memberId) => ({
-                memberId,
-                rsvp: memberId === access.memberId ? "YES" : "NONE",
-              })),
-            }
-          : undefined,
-        reminders: input.reminders.length > 0
-          ? {
-              create: input.reminders.map((r) => ({
-                minutesBefore: r.minutesBefore,
-              })),
-            }
-          : undefined,
+        attendees:
+          input.attendeeIds.length > 0
+            ? {
+                create: input.attendeeIds.map((memberId) => ({
+                  memberId,
+                  rsvp: memberId === access.memberId ? "YES" : "NONE",
+                })),
+              }
+            : undefined,
+        reminders:
+          input.reminders.length > 0
+            ? {
+                create: input.reminders.map((r) => ({
+                  minutesBefore: r.minutesBefore,
+                })),
+              }
+            : undefined,
       },
       select: { id: true },
     });
@@ -119,13 +171,19 @@ export async function updateAgendaEvent(
   rawInput: unknown,
 ): Promise<ActionResult<{ id: string }>> {
   const access = await requireAuthorized();
-  if (!hasPermission(access.membership, "agenda.update")) {
+  if (
+    !hasPermission(access.membership, "agenda.event.update.own") &&
+    !hasPermission(access.membership, "agenda.event.update.any")
+  ) {
     return { ok: false, error: "You don't have permission to update events." };
   }
 
   const parsed = updateEventSchema.safeParse(rawInput);
   if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid event data." };
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid event data.",
+    };
   }
   const input = parsed.data;
 
@@ -136,6 +194,17 @@ export async function updateAgendaEvent(
   if (!existing) {
     return { ok: false, error: "Event not found." };
   }
+
+  if (
+    existing.createdByMemberId !== access.memberId &&
+    !hasPermission(access.membership, "agenda.event.update.any")
+  )
+    return { ok: false, error: "You can only edit events you created." };
+  if (
+    existing.visibility === "PRIVATE" &&
+    existing.createdByMemberId !== access.memberId
+  )
+    return { ok: false, error: "Private event." };
 
   // If updating times, validate start < end
   if (input.startAt && input.endAt) {
@@ -173,23 +242,36 @@ export async function updateAgendaEvent(
       select: { id: true },
     });
     if (members.length !== input.attendeeIds.length) {
-      return { ok: false, error: "One or more attendees are not family members." };
+      return {
+        ok: false,
+        error: "One or more attendees are not family members.",
+      };
     }
   }
 
   try {
-    const { attendeeIds, reminders, ...eventData } = input;
+    const { attendeeIds, reminders, version, ...eventData } = input;
 
     await prisma.$transaction(async (tx) => {
-      await tx.calendarEvent.update({
-        where: { id: eventId },
+      const updated = await tx.calendarEvent.updateMany({
+        where: {
+          id: eventId,
+          familyId: access.familyId,
+          deletedAt: null,
+          version: version ?? existing.version,
+        },
         data: {
           ...eventData,
           startAt: input.startAt ? new Date(input.startAt) : undefined,
           endAt: input.endAt ? new Date(input.endAt) : undefined,
           updatedByMemberId: access.memberId,
+          version: { increment: 1 },
         },
       });
+      if (!updated.count)
+        throw new Error(
+          "This event changed since you opened it. Close the editor, refresh and try again.",
+        );
 
       if (attendeeIds !== undefined) {
         await tx.eventAttendee.deleteMany({ where: { eventId } });
@@ -208,7 +290,10 @@ export async function updateAgendaEvent(
         await tx.eventReminder.deleteMany({ where: { eventId } });
         if (reminders.length > 0) {
           await tx.eventReminder.createMany({
-            data: reminders.map((r) => ({ eventId, minutesBefore: r.minutesBefore })),
+            data: reminders.map((r) => ({
+              eventId,
+              minutesBefore: r.minutesBefore,
+            })),
           });
         }
       }
@@ -216,14 +301,24 @@ export async function updateAgendaEvent(
 
     revalidatePath("/agenda");
     return { ok: true, data: { id: eventId } };
-  } catch {
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith("This event changed")
+    )
+      return { ok: false, error: error.message };
     return { ok: false, error: "Couldn't update the event. Please try again." };
   }
 }
 
-export async function deleteAgendaEvent(eventId: string): Promise<ActionResult> {
+export async function deleteAgendaEvent(
+  eventId: string,
+): Promise<ActionResult> {
   const access = await requireAuthorized();
-  if (!hasPermission(access.membership, "agenda.delete")) {
+  if (
+    !hasPermission(access.membership, "agenda.event.delete.own") &&
+    !hasPermission(access.membership, "agenda.event.delete.any")
+  ) {
     return { ok: false, error: "You don't have permission to delete events." };
   }
 
@@ -233,6 +328,17 @@ export async function deleteAgendaEvent(eventId: string): Promise<ActionResult> 
   if (!existing) {
     return { ok: false, error: "Event not found." };
   }
+
+  if (
+    existing.createdByMemberId !== access.memberId &&
+    !hasPermission(access.membership, "agenda.event.delete.any")
+  )
+    return { ok: false, error: "You can only delete events you created." };
+  if (
+    existing.visibility === "PRIVATE" &&
+    existing.createdByMemberId !== access.memberId
+  )
+    return { ok: false, error: "Private event." };
 
   try {
     await prisma.calendarEvent.update({
@@ -253,8 +359,16 @@ export async function createEventCategory(
 ): Promise<ActionResult<{ id: string }>> {
   const access = await requireAuthorized();
   if (!hasPermission(access.membership, "agenda.manage")) {
-    return { ok: false, error: "You don't have permission to manage categories." };
+    return {
+      ok: false,
+      error: "You don't have permission to manage categories.",
+    };
   }
+  if (
+    !z.string().trim().min(1).max(80).safeParse(name).success ||
+    !/^#[0-9a-fA-F]{6}$/.test(color)
+  )
+    return { ok: false, error: "Enter a name and a valid calendar color." };
 
   try {
     const category = await prisma.eventCategory.create({
@@ -279,8 +393,16 @@ export async function updateEventCategory(
 ): Promise<ActionResult> {
   const access = await requireAuthorized();
   if (!hasPermission(access.membership, "agenda.manage")) {
-    return { ok: false, error: "You don't have permission to manage categories." };
+    return {
+      ok: false,
+      error: "You don't have permission to manage categories.",
+    };
   }
+  if (
+    !z.string().trim().min(1).max(80).safeParse(name).success ||
+    !/^#[0-9a-fA-F]{6}$/.test(color)
+  )
+    return { ok: false, error: "Enter a name and a valid calendar color." };
 
   try {
     await prisma.eventCategory.update({
@@ -298,10 +420,15 @@ export async function updateEventCategory(
   }
 }
 
-export async function deleteEventCategory(categoryId: string): Promise<ActionResult> {
+export async function deleteEventCategory(
+  categoryId: string,
+): Promise<ActionResult> {
   const access = await requireAuthorized();
   if (!hasPermission(access.membership, "agenda.manage")) {
-    return { ok: false, error: "You don't have permission to manage categories." };
+    return {
+      ok: false,
+      error: "You don't have permission to manage categories.",
+    };
   }
 
   // Check if category has events
@@ -309,11 +436,17 @@ export async function deleteEventCategory(categoryId: string): Promise<ActionRes
     where: { categoryId, familyId: access.familyId, deletedAt: null },
   });
   if (eventCount > 0) {
-    return { ok: false, error: "Cannot delete category with existing events. Reassign or delete events first." };
+    return {
+      ok: false,
+      error:
+        "Cannot delete category with existing events. Reassign or delete events first.",
+    };
   }
 
   try {
-    await prisma.eventCategory.delete({ where: { id: categoryId, familyId: access.familyId } });
+    await prisma.eventCategory.delete({
+      where: { id: categoryId, familyId: access.familyId },
+    });
     revalidatePath("/agenda");
     return { ok: true, data: undefined };
   } catch {
@@ -321,18 +454,35 @@ export async function deleteEventCategory(categoryId: string): Promise<ActionRes
   }
 }
 
-export async function updateRsvp(eventId: string, rsvp: "NONE" | "YES" | "NO" | "MAYBE"): Promise<ActionResult> {
+export async function updateRsvp(
+  eventId: string,
+  rsvp: "NONE" | "YES" | "NO" | "MAYBE",
+): Promise<ActionResult> {
   const access = await requireAuthorized();
   if (!hasPermission(access.membership, "agenda.read")) {
-    return { ok: false, error: "You don't have permission to view the agenda." };
+    return {
+      ok: false,
+      error: "You don't have permission to view the agenda.",
+    };
   }
 
   const existing = await prisma.calendarEvent.findFirst({
-    where: { id: eventId, familyId: access.familyId, deletedAt: null },
+    where: {
+      id: eventId,
+      familyId: access.familyId,
+      deletedAt: null,
+      OR: [
+        { visibility: "FAMILY" },
+        { createdByMemberId: access.memberId },
+        { attendees: { some: { memberId: access.memberId } } },
+      ],
+    },
   });
   if (!existing) {
     return { ok: false, error: "Event not found." };
   }
+  if (!z.enum(["NONE", "YES", "NO", "MAYBE"]).safeParse(rsvp).success)
+    return { ok: false, error: "Invalid response." };
 
   try {
     await prisma.eventAttendee.upsert({
@@ -346,4 +496,13 @@ export async function updateRsvp(eventId: string, rsvp: "NONE" | "YES" | "NO" | 
   } catch {
     return { ok: false, error: "Couldn't update your RSVP." };
   }
+}
+
+export async function fetchAgendaRange(start: string, end: string) {
+  const access = await requireAccess("agenda.read", "agenda");
+  const from = new Date(z.string().datetime().parse(start));
+  const to = new Date(z.string().datetime().parse(end));
+  if (from >= to || to.getTime() - from.getTime() > 370 * 86400000)
+    throw new Error("Invalid calendar range.");
+  return listFamilyEvents(access.familyId, access.memberId, from, to);
 }
